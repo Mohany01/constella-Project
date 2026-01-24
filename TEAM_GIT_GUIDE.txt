@@ -1,0 +1,25 @@
+git clone <repo-url>
+cd <project-folder>
+git checkout main // first step to update your main
+git pull origin main // second step To Update your main
+
+git checkout -b branchname // to create branch 
+git checkout branchname // first step to update your branch with main updates
+git merge main   // second step  update your branch with main updates
+
+// FIRST STEP TO WORK ON YOUR PROJECT
+git checkout main
+git pull origin main          
+git checkout branchname
+git merge main 
+// SECOND STEP TO PUSH YOUR CODE
+git add .
+git commit -m "YOUR COMMIT"
+git push origin your branch name 
+// Third Step 
+open Repo on githup
+>>Pull Request
+From: Your Branch
+To: main
+>>Add Clear commits
+Submit Pull Request
