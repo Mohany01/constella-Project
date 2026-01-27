@@ -3,16 +3,15 @@ import "../styles/globals.css";
 export const metadata = {
   title: "Constella",
   description: "Constella App",
-  icons: {
-    icon: "/icon.png",
-    shortcut: "/icon.png",
-    apple: "/icon.png",
-  },
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
+      <head>
+        <link rel="icon" href="/favicon.ico" />
+        <link rel="apple-touch-icon" href="/icon.png" />
+      </head>
       <body>
         {children}
       </body>
