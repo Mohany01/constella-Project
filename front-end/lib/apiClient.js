@@ -1,34 +1,30 @@
-export async function apiClient(path, options = {}) {
-  const { headers = {}, ...rest } = options;
+const BASE_URL = "http://localhost:8000"; // FastAPI port
 
-  const response = await fetch(path, {
-    ...rest,
+export async function apiClient(url, options = {}) {
+  const res = await fetch(`${BASE_URL}${url}`, {
     headers: {
       "Content-Type": "application/json",
-      ...headers,
+      ...(options.headers || {}),
     },
+    ...options,
   });
 
-  // Attempt to parse JSON; fallback to text so we always return something useful.
-  const text = await response.text();
-  const data = text ? safeParseJson(text) : null;
-
-  if (!response.ok) {
-    const message =
-      data?.message ||
-      data?.error ||
-      text ||
-      `Request failed with status ${response.status}`;
-    throw new Error(message);
-  }
-
-  return data ?? { message: "Success" };
-}
-
-function safeParseJson(text) {
+  let data = null;
   try {
-    return JSON.parse(text);
-  } catch {
-    return null;
+    data = await res.json();
+  } catch {}
+
+  if (!res.ok) {
+    if (data?.detail) {
+      if (Array.isArray(data.detail)) {
+        throw new Error(
+          data.detail.map(e => `${e.loc.at(-1)}: ${e.msg}`).join(", ")
+        );
+      }
+      throw new Error(data.detail);
+    }
+    throw new Error(`Request failed with status ${res.status}`);
   }
+
+  return data;
 }
