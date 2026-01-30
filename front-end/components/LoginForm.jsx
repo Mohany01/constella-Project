@@ -70,11 +70,11 @@ export default function LoginForm({ className = "" }) {
     <form className={`grid gap-3 ${className}`.trim()} onSubmit={handleSubmit}>
       {/* Email */}
       <div className="grid gap-1">
-        <label className="subtitle text-sm text-gray-300">Email</label>
         <input
           className="input"
           type="email"
-          placeholder="you@example.com"
+          placeholder="Enter your email address"
+          aria-label="Email address"
           value={email}
           onChange={(e) => handleEmailChange(e.target.value)}
           required
@@ -84,11 +84,11 @@ export default function LoginForm({ className = "" }) {
 
       {/* Password */}
       <div className="grid gap-1">
-        <label className="subtitle text-sm text-gray-300">Password</label>
         <input
           className="input"
           type="password"
-          placeholder="********"
+          placeholder="Enter your password"
+          aria-label="Password"
           value={password}
           onChange={(e) => handlePasswordChange(e.target.value)}
           required
