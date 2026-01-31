@@ -45,13 +45,14 @@ export default function SignupForm({ className = "", step: externalStep, setStep
   const [showPassword, setShowPassword] = useState(false);
 
   // Step 2
-  const [role, setRole] = useState("project-manager");
+  const [role, setRole] = useState("company");
   const [totalHours, setTotalHours] = useState("");
   const [availableHours, setAvailableHours] = useState("");
   const [skills, setSkills] = useState([]);
   const [skillInput, setSkillInput] = useState("");
   const [cvFile, setCvFile] = useState(null);
-  const [department, setDepartment] = useState("");
+  const [company, setCompany] = useState("");
+  const [companyError, setCompanyError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const miniStepsTotal = role === "employee" ? 2 : 0;
 
@@ -230,8 +231,12 @@ export default function SignupForm({ className = "", step: externalStep, setStep
       email.includes("@") &&
       /\.[a-zA-Z]{2,}$/.test(email);
     const passwordOk = !!password && password.length >= 8;
+    const companyOk = role !== "company" || !!company.trim();
+    if (!companyOk) {
+      setCompanyError("Please choose your company.");
+    }
     const stepOneOk = nameOk && emailOk && passwordOk && !emailError && !passwordError;
-    if (!stepOneOk || (role === "employee" && !hoursOk)) {
+    if (!stepOneOk || (role === "employee" && !hoursOk) || !companyOk) {
       setIsError(true);
       setMessage("Please fix the errors above.");
       return;
@@ -252,7 +257,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
           totalHoursPerWeek: totalHours,
           availableHours,
           skills,
-          department: role === "project-manager" ? department : undefined,
+          company: role === "company" ? company.trim() : undefined,
         }),
       });
       setMessage(data?.message || "Account created successfully.");
@@ -263,7 +268,8 @@ export default function SignupForm({ className = "", step: externalStep, setStep
       setAvailableHours("");
       setSkills([]);
       setCvFile(null);
-      setDepartment("");
+      setCompany("");
+      setCompanyError("");
       setStep(1);
     } catch (error) {
       setIsError(true);
@@ -384,9 +390,9 @@ export default function SignupForm({ className = "", step: externalStep, setStep
           )}
 
               <div className="field">
-                <label>Role</label>
+                <label>Account Type</label>
                 <div className="segment">
-                  {["project-manager", "employee"].map((option) => (
+                  {["company", "employee"].map((option) => (
                     <button
                   key={option}
                   type="button"
@@ -394,7 +400,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
                   onClick={() => setRole(option)}
                   aria-pressed={role === option}
                 >
-                  {option === "project-manager" ? "Project Manager" : "Employee"}
+                  {option === "company" ? "Company" : "Employee"}
                 </button>
               ))}
             </div>
@@ -536,16 +542,27 @@ export default function SignupForm({ className = "", step: externalStep, setStep
             </div>
           )}
 
-          {role === "project-manager" && (
+          {role === "company" && (
             <div className="field">
-              <label htmlFor="department">Department (optional)</label>
+              <label htmlFor="company">Company</label>
               <input
-                id="department"
-                className="input modern"
-                placeholder="e.g. Product"
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
+                id="company"
+                className={`input modern ${companyError ? "input-error" : ""}`.trim()}
+                placeholder="company name"
+                value={company}
+                onChange={(e) => {
+                  setCompany(e.target.value);
+                  if (companyError) setCompanyError("");
+                }}
+                required
               />
+              {companyError ? (
+                <p className="field-error" role="alert">
+                  {companyError}
+                </p>
+              ) : (
+                <div className="field-feedback-spacer" aria-hidden />
+              )}
             </div>
           )}
 
