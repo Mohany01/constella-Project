@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { apiClient } from "../lib/apiClient";
 
 export default function LoginForm({ className = "" }) {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
@@ -14,7 +16,7 @@ export default function LoginForm({ className = "" }) {
   const [isError, setIsError] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // 🔹 Email validation
+  // Email validation
   function handleEmailChange(value) {
     setEmail(value);
 
@@ -26,7 +28,7 @@ export default function LoginForm({ className = "" }) {
     }
   }
 
-  // 🔹 Password validation
+  // Password validation
   function handlePasswordChange(value) {
     setPassword(value);
 
@@ -40,7 +42,6 @@ export default function LoginForm({ className = "" }) {
   async function handleSubmit(e) {
     e.preventDefault();
 
-    // Final frontend check
     if (emailError || passwordError || !email || !password) {
       setIsError(true);
       setMessage("Please fix the errors above");
@@ -57,7 +58,16 @@ export default function LoginForm({ className = "" }) {
         body: JSON.stringify({ email, password }),
       });
 
+      if (typeof window !== "undefined") {
+        localStorage.setItem("token", data.token);
+        localStorage.setItem(
+          "user",
+          JSON.stringify({ id: data.id, name: data.name, email: data.email })
+        );
+      }
+
       setMessage(`Welcome back, ${data.name} 👋`);
+      router.push("/dashboard");
     } catch (error) {
       setIsError(true);
       setMessage(error.message || "Invalid email or password");

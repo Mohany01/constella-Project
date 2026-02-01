@@ -1,11 +1,18 @@
-const BASE_URL = "http://localhost:8000"; // FastAPI port
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export async function apiClient(url, options = {}) {
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("token") : null;
+
+  const isFormData = options.body instanceof FormData;
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(isFormData ? {} : { "Content-Type": "application/json" }),
+    ...(options.headers || {}),
+  };
+
   const res = await fetch(`${BASE_URL}${url}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
+    headers,
     ...options,
   });
 
@@ -15,15 +22,15 @@ export async function apiClient(url, options = {}) {
   } catch {}
 
   if (!res.ok) {
-    if (data?.detail) {
-      if (Array.isArray(data.detail)) {
-        throw new Error(
-          data.detail.map(e => `${e.loc.at(-1)}: ${e.msg}`).join(", ")
-        );
-      }
-      throw new Error(data.detail);
+    let detail = null;
+    if (Array.isArray(data?.detail)) {
+      detail = data.detail.map(e => `${e.loc?.at(-1)}: ${e.msg}`).join(", ");
+    } else if (typeof data?.detail === "string") {
+      detail = data.detail;
+    } else if (typeof data?.message === "string") {
+      detail = data.message;
     }
-    throw new Error(`Request failed with status ${res.status}`);
+    throw new Error(detail || `Request failed with status ${res.status}`);
   }
 
   return data;

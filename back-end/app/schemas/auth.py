@@ -8,6 +8,9 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: constr(min_length=6, max_length=128)
 
+    class Config:
+        extra = "ignore"  # ignore any additional frontend fields
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: constr(min_length=6, max_length=128)
@@ -19,5 +22,7 @@ class MessageResponse(BaseModel):
     message: str
 
 class UserResponse(BaseModel):
+    id: str
     name: str
     email: EmailStr
+    token: str

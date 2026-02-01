@@ -181,7 +181,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
   }
 
   // Step actions
-  function goNext() {
+  async function goNext() {
     if (!name.trim()) {
       setNameError("Full name is required.");
     } else {
@@ -196,7 +196,10 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     }
     setIsError(false);
     setMessage(null);
-    setStep(2);
+    const created = await handleSubmit();
+    if (created) {
+      setStep(2); // optional profile step after account is created
+    }
   }
 
   function goBack() {
@@ -225,18 +228,13 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     }
     handleEmailChange(email);
     handlePasswordChange(password);
-    const hoursOk = validateHours(totalHours, availableHours);
     const emailOk =
       !!email &&
       email.includes("@") &&
-      /\.[a-zA-Z]{2,}$/.test(email);
-    const passwordOk = !!password && password.length >= 8;
-    const companyOk = role !== "company" || !!company.trim();
-    if (!companyOk) {
-      setCompanyError("Please choose your company.");
-    }
+      email.includes(".");
+    const passwordOk = !!password && password.length >= 6;
     const stepOneOk = nameOk && emailOk && passwordOk && !emailError && !passwordError;
-    if (!stepOneOk || (role === "employee" && !hoursOk) || !companyOk) {
+    if (!stepOneOk) {
       setIsError(true);
       setMessage("Please fix the errors above.");
       return;
@@ -253,11 +251,6 @@ export default function SignupForm({ className = "", step: externalStep, setStep
           name: name.trim(),
           email: email.trim(),
           password,
-          role,
-          totalHoursPerWeek: totalHours,
-          availableHours,
-          skills,
-          company: role === "company" ? company.trim() : undefined,
         }),
       });
       setMessage(data?.message || "Account created successfully.");
@@ -271,9 +264,11 @@ export default function SignupForm({ className = "", step: externalStep, setStep
       setCompany("");
       setCompanyError("");
       setStep(1);
+      return true;
     } catch (error) {
       setIsError(true);
       setMessage(error.message || "Something went wrong.");
+      return false;
     } finally {
       setLoading(false);
     }
