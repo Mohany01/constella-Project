@@ -8,29 +8,6 @@ const socialButtons = [
   { id: "github", label: "Continue with GitHub", icon: "GH" },
 ];
 
-const skillDictionary = [
-  "python",
-  "javascript",
-  "typescript",
-  "react",
-  "next.js",
-  "node",
-  "express",
-  "django",
-  "flask",
-  "java",
-  "c#",
-  "c++",
-  "sql",
-  "mysql",
-  "postgresql",
-  "mongodb",
-  "aws",
-  "docker",
-  "kubernetes",
-  "figma",
-];
-
 export default function SignupForm({ className = "", step: externalStep, setStep: externalSetStep }) {
   const [stepInternal, setStepInternal] = useState(1);
   const step = externalStep ?? stepInternal;
@@ -49,11 +26,28 @@ export default function SignupForm({ className = "", step: externalStep, setStep
   const [totalHours, setTotalHours] = useState("");
   const [availableHours, setAvailableHours] = useState("");
   const [skills, setSkills] = useState([]);
-  const [skillInput, setSkillInput] = useState("");
+  const [manualGroups, setManualGroups] = useState({
+    core_hard_skills: [],
+    core_tools_and_tech: [],
+    core_soft_skills: [],
+    core_languages: [],
+  });
+  const [extractedGroups, setExtractedGroups] = useState({
+    core_hard_skills: [],
+    core_tools_and_tech: [],
+    core_soft_skills: [],
+    core_languages: [],
+  });
+  const [hardSkillInput, setHardSkillInput] = useState("");
+  const [softSkillInput, setSoftSkillInput] = useState("");
+  const [toolsSkillInput, setToolsSkillInput] = useState("");
+  const [languageSkillInput, setLanguageSkillInput] = useState("");
   const [cvFile, setCvFile] = useState(null);
   const [company, setCompany] = useState("");
   const [companyError, setCompanyError] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [cvLoading, setCvLoading] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
   const miniStepsTotal = role === "employee" ? 2 : 0;
 
   // Errors and messages
@@ -123,35 +117,71 @@ export default function SignupForm({ className = "", step: externalStep, setStep
   }
 
   // Skills helpers
-  function addSkill(newSkill) {
-    const value = (newSkill || skillInput).trim();
-    if (!value) return;
-    const next = Array.from(new Set([...skills, value]));
-    setSkills(next);
-    setSkillInput("");
+  function addManualSkill(category, value) {
+    const trimmed = (value || "").trim();
+    if (!trimmed) return;
+    setManualGroups((prev) => ({
+      ...prev,
+      [category]: Array.from(new Set([...(prev[category] || []), trimmed])),
+    }));
+    setSkills((prev) => Array.from(new Set([...prev, trimmed])));
   }
 
   function removeSkill(skill) {
     setSkills((prev) => prev.filter((s) => s !== skill));
+    setExtractedGroups((prev) => ({
+      core_hard_skills: prev.core_hard_skills.filter((s) => s !== skill),
+      core_tools_and_tech: prev.core_tools_and_tech.filter((s) => s !== skill),
+      core_soft_skills: prev.core_soft_skills.filter((s) => s !== skill),
+      core_languages: prev.core_languages.filter((s) => s !== skill),
+    }));
+    setManualGroups((prev) => ({
+      core_hard_skills: prev.core_hard_skills.filter((s) => s !== skill),
+      core_tools_and_tech: prev.core_tools_and_tech.filter((s) => s !== skill),
+      core_soft_skills: prev.core_soft_skills.filter((s) => s !== skill),
+      core_languages: prev.core_languages.filter((s) => s !== skill),
+    }));
   }
 
-  function extractSkillsFromText(text) {
-    const lower = text.toLowerCase();
-    const found = skillDictionary.filter((k) => lower.includes(k));
-    if (found.length) {
-      setSkills((prev) => Array.from(new Set([...prev, ...found])));
-    }
+  function mergeSkills(nextSkills) {
+    const normalized = nextSkills
+      .map((s) => (typeof s === "string" ? s.trim() : ""))
+      .filter(Boolean);
+    if (!normalized.length) return;
+    setSkills((prev) => Array.from(new Set([...prev, ...normalized])));
   }
 
   async function handleCvUpload(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     setCvFile(file);
+    setCvLoading(true);
+    setMessage(null);
+    setIsError(false);
     try {
-      const text = await file.text();
-      extractSkillsFromText(text);
-    } catch {
-      // ignore silently
+      const formData = new FormData();
+      formData.append("file", file);
+      const data = await apiClient("/cv/extract", {
+        method: "POST",
+        body: formData,
+      });
+      const summary = data?.summary || {};
+      const hard = summary.core_hard_skills || [];
+      const tools = summary.core_tools_and_tech || [];
+      const soft = summary.core_soft_skills || [];
+      const languages = summary.core_languages || [];
+      setExtractedGroups({
+        core_hard_skills: Array.from(new Set(hard)),
+        core_tools_and_tech: Array.from(new Set(tools)),
+        core_soft_skills: Array.from(new Set(soft)),
+        core_languages: Array.from(new Set(languages)),
+      });
+      mergeSkills([...hard, ...tools, ...soft, ...languages]);
+    } catch (error) {
+      setIsError(true);
+      setMessage(error.message || "Failed to extract skills from CV.");
+    } finally {
+      setCvLoading(false);
     }
   }
 
@@ -161,11 +191,33 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     const file = e.dataTransfer.files?.[0];
     if (file && /\.(pdf|docx?|txt)$/i.test(file.name)) {
       setCvFile(file);
+      setCvLoading(true);
+      setMessage(null);
+      setIsError(false);
       try {
-        const text = await file.text();
-        extractSkillsFromText(text);
-      } catch {
-        // ignore silently
+        const formData = new FormData();
+        formData.append("file", file);
+        const data = await apiClient("/cv/extract", {
+          method: "POST",
+          body: formData,
+        });
+        const summary = data?.summary || {};
+        const hard = summary.core_hard_skills || [];
+        const tools = summary.core_tools_and_tech || [];
+        const soft = summary.core_soft_skills || [];
+        const languages = summary.core_languages || [];
+        setExtractedGroups({
+          core_hard_skills: Array.from(new Set(hard)),
+          core_tools_and_tech: Array.from(new Set(tools)),
+          core_soft_skills: Array.from(new Set(soft)),
+          core_languages: Array.from(new Set(languages)),
+        });
+        mergeSkills([...hard, ...tools, ...soft, ...languages]);
+      } catch (error) {
+        setIsError(true);
+        setMessage(error.message || "Failed to extract skills from CV.");
+      } finally {
+        setCvLoading(false);
       }
     }
   }
@@ -253,13 +305,36 @@ export default function SignupForm({ className = "", step: externalStep, setStep
           password,
         }),
       });
-      setMessage(data?.message || "Account created successfully.");
+      if (typeof window !== "undefined" && data?.token) {
+        localStorage.setItem("token", data.token);
+        localStorage.setItem(
+          "user",
+          JSON.stringify({ id: data.id, name: data.name, email: data.email })
+        );
+      }
+      setMessage("Account created successfully.");
       setName("");
       setEmail("");
       setPassword("");
       setTotalHours("");
       setAvailableHours("");
       setSkills([]);
+      setManualGroups({
+        core_hard_skills: [],
+        core_tools_and_tech: [],
+        core_soft_skills: [],
+        core_languages: [],
+      });
+      setHardSkillInput("");
+      setSoftSkillInput("");
+      setToolsSkillInput("");
+      setLanguageSkillInput("");
+      setExtractedGroups({
+        core_hard_skills: [],
+        core_tools_and_tech: [],
+        core_soft_skills: [],
+        core_languages: [],
+      });
       setCvFile(null);
       setCompany("");
       setCompanyError("");
@@ -271,6 +346,29 @@ export default function SignupForm({ className = "", step: externalStep, setStep
       return false;
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSaveSkills() {
+    if (!skills.length) {
+      setIsError(true);
+      setMessage("Add or extract at least one skill before saving.");
+      return;
+    }
+    setSaveLoading(true);
+    setMessage(null);
+    setIsError(false);
+    try {
+      const data = await apiClient("/cv/save-skills", {
+        method: "POST",
+        body: JSON.stringify({ skills }),
+      });
+      setMessage(`Saved ${data?.saved_skills ?? 0} skills.`);
+    } catch (error) {
+      setIsError(true);
+      setMessage(error.message || "Failed to save skills.");
+    } finally {
+      setSaveLoading(false);
     }
   }
 
@@ -446,51 +544,256 @@ export default function SignupForm({ className = "", step: externalStep, setStep
               <div className="field">
                 <div className="field-row">
                   <label>Skills</label>
-                  <span className="field-hint">Suggested from your CV</span>
+                  <span className="field-hint">
+                    Suggested from your CV
+                    {cvLoading ? " (extracting...)" : ""}
+                  </span>
                 </div>
 
-                {skills.length > 0 ? (
-                  <div className="chips">
-                    {skills.map((skill) => (
-                      <span key={skill} className="chip chip-animate">
-                        {skill}
-                        <button
-                          type="button"
-                          className="chip-remove"
-                          aria-label={`Remove ${skill}`}
-                          onClick={() => removeSkill(skill)}
-                        >
-                          -
-                        </button>
-                      </span>
-                    ))}
+                <div className="space-y-4">
+                  <div>
+                    <p className="field-hint">Hard skills</p>
+                    {(extractedGroups.core_hard_skills.length > 0 ||
+                      manualGroups.core_hard_skills.length > 0) ? (
+                      <div className="chips">
+                        {Array.from(
+                          new Set([
+                            ...extractedGroups.core_hard_skills,
+                            ...manualGroups.core_hard_skills,
+                          ])
+                        ).map((skill) => (
+                          <span key={skill} className="chip chip-animate">
+                            {skill}
+                            <button
+                              type="button"
+                              className="chip-remove"
+                              aria-label={`Remove ${skill}`}
+                              onClick={() => removeSkill(skill)}
+                            >
+                              -
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="field-hint skills-placeholder">
+                        No hard skills yet.
+                      </p>
+                    )}
+                    <div className="add-skill-inline add-skill-inline--compact">
+                      <input
+                        className="input modern input-compact"
+                        placeholder="Add hard skill"
+                        value={hardSkillInput}
+                        onChange={(e) => setHardSkillInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addManualSkill("core_hard_skills", hardSkillInput);
+                            setHardSkillInput("");
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="pill-add icon-only pill-add--compact"
+                        onClick={() => {
+                          addManualSkill("core_hard_skills", hardSkillInput);
+                          setHardSkillInput("");
+                        }}
+                        aria-label="Add hard skill"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
-                ) : (
+
+                  <div>
+                    <p className="field-hint">Soft skills</p>
+                    {(extractedGroups.core_soft_skills.length > 0 ||
+                      manualGroups.core_soft_skills.length > 0) ? (
+                      <div className="chips">
+                        {Array.from(
+                          new Set([
+                            ...extractedGroups.core_soft_skills,
+                            ...manualGroups.core_soft_skills,
+                          ])
+                        ).map((skill) => (
+                          <span key={skill} className="chip chip-animate">
+                            {skill}
+                            <button
+                              type="button"
+                              className="chip-remove"
+                              aria-label={`Remove ${skill}`}
+                              onClick={() => removeSkill(skill)}
+                            >
+                              -
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="field-hint skills-placeholder">
+                        No soft skills yet.
+                      </p>
+                    )}
+                    <div className="add-skill-inline add-skill-inline--compact">
+                      <input
+                        className="input modern input-compact"
+                        placeholder="Add soft skill"
+                        value={softSkillInput}
+                        onChange={(e) => setSoftSkillInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addManualSkill("core_soft_skills", softSkillInput);
+                            setSoftSkillInput("");
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="pill-add icon-only pill-add--compact"
+                        onClick={() => {
+                          addManualSkill("core_soft_skills", softSkillInput);
+                          setSoftSkillInput("");
+                        }}
+                        aria-label="Add soft skill"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="field-hint">Tools and tech</p>
+                    {(extractedGroups.core_tools_and_tech.length > 0 ||
+                      manualGroups.core_tools_and_tech.length > 0) ? (
+                      <div className="chips">
+                        {Array.from(
+                          new Set([
+                            ...extractedGroups.core_tools_and_tech,
+                            ...manualGroups.core_tools_and_tech,
+                          ])
+                        ).map((skill) => (
+                          <span key={skill} className="chip chip-animate">
+                            {skill}
+                            <button
+                              type="button"
+                              className="chip-remove"
+                              aria-label={`Remove ${skill}`}
+                              onClick={() => removeSkill(skill)}
+                            >
+                              -
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="field-hint skills-placeholder">
+                        No tools or tech yet.
+                      </p>
+                    )}
+                    <div className="add-skill-inline add-skill-inline--compact">
+                      <input
+                        className="input modern input-compact"
+                        placeholder="Add tool or tech"
+                        value={toolsSkillInput}
+                        onChange={(e) => setToolsSkillInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addManualSkill("core_tools_and_tech", toolsSkillInput);
+                            setToolsSkillInput("");
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="pill-add icon-only pill-add--compact"
+                        onClick={() => {
+                          addManualSkill("core_tools_and_tech", toolsSkillInput);
+                          setToolsSkillInput("");
+                        }}
+                        aria-label="Add tool or tech"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="field-hint">Languages</p>
+                    {(extractedGroups.core_languages.length > 0 ||
+                      manualGroups.core_languages.length > 0) ? (
+                      <div className="chips">
+                        {Array.from(
+                          new Set([
+                            ...extractedGroups.core_languages,
+                            ...manualGroups.core_languages,
+                          ])
+                        ).map((skill) => (
+                          <span key={skill} className="chip chip-animate">
+                            {skill}
+                            <button
+                              type="button"
+                              className="chip-remove"
+                              aria-label={`Remove ${skill}`}
+                              onClick={() => removeSkill(skill)}
+                            >
+                              -
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="field-hint skills-placeholder">
+                        No languages yet.
+                      </p>
+                    )}
+                    <div className="add-skill-inline add-skill-inline--compact">
+                      <input
+                        className="input modern input-compact"
+                        placeholder="Add language"
+                        value={languageSkillInput}
+                        onChange={(e) => setLanguageSkillInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addManualSkill("core_languages", languageSkillInput);
+                            setLanguageSkillInput("");
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="pill-add icon-only pill-add--compact"
+                        onClick={() => {
+                          addManualSkill("core_languages", languageSkillInput);
+                          setLanguageSkillInput("");
+                        }}
+                        aria-label="Add language"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {skills.length === 0 && (
                   <p className="field-hint skills-placeholder">
                     Upload your CV to auto-fill skills, or add them manually.
                   </p>
                 )}
 
-                <div className="add-skill-inline">
-                  <input
-                    className="input modern"
-                    placeholder="Add a skill"
-                    value={skillInput}
-                    onChange={(e) => setSkillInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        addSkill();
-                      }
-                    }}
-                  />
+                <div className="mt-3 flex justify-end">
                   <button
                     type="button"
-                    className="pill-add icon-only"
-                    onClick={() => addSkill()}
-                    aria-label="Add skill"
+                    className="btn-primary"
+                    onClick={handleSaveSkills}
+                    disabled={saveLoading}
                   >
-                    +
+                    {saveLoading ? "Saving..." : "Save Skills"}
                   </button>
                 </div>
               </div>

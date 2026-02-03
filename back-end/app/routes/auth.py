@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from jose import jwt
 
 from app.db import get_connection, release_connection
-from app.schemas.auth import LoginRequest, MessageResponse, SignupRequest, UserResponse
+from app.schemas.auth import LoginRequest, SignupRequest, UserResponse
 from app.auth_guard import get_current_user
 
 JWT_SECRET = os.getenv("JWT_SECRET")
@@ -32,7 +32,7 @@ def create_token(user_id: str, email: str):
 # ----------------------
 # SIGNUP
 # ----------------------
-@router.post("/signup", response_model=MessageResponse)
+@router.post("/signup", response_model=UserResponse)
 def signup(data: SignupRequest):
     name = data.name
     email = data.email
@@ -61,7 +61,8 @@ def signup(data: SignupRequest):
         cur.close()
         release_connection(conn)
 
-    return {"message": "User created successfully"}
+    token = create_token(user_id=str(new_id), email=email)
+    return {"id": str(new_id), "name": name, "email": email, "token": token}
 
 # ----------------------
 # LOGIN

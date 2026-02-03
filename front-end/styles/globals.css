@@ -1663,6 +1663,13 @@ button {
   line-height: 1.45;
 }
 
+.input.modern.input-compact {
+  height: 34px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  border-radius: 10px;
+}
+
 .input.modern:focus {
   outline: none;
   border-color: rgba(125, 94, 239, 0.65);
@@ -1916,6 +1923,18 @@ button {
   place-items: center;
   padding: 0;
   font-size: 1.1rem;
+}
+
+.pill-add.icon-only.pill-add--compact {
+  width: 30px;
+  height: 30px;
+  font-size: 0.9rem;
+  border-radius: 10px;
+}
+
+.add-skill-inline--compact {
+  gap: 6px;
+  align-items: center;
 }
 
 .actions {
