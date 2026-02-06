@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import PageWrapper from "../../components/PageWrapper";
 import SignupForm from "../../components/SignupForm";
 import Link from "next/link";
@@ -10,6 +10,17 @@ export default function SignupPage() {
   const [step, setStep] = useState(1);
   const progressValue = step === 1 ? 50 : 100;
   const isStepOne = step === 1;
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const body = document.body;
+    root.classList.add("no-page-scroll");
+    body.classList.add("no-page-scroll");
+    return () => {
+      root.classList.remove("no-page-scroll");
+      body.classList.remove("no-page-scroll");
+    };
+  }, []);
 
   return (
     <PageWrapper className="signup-bg">
@@ -73,27 +84,29 @@ export default function SignupPage() {
         </aside>
 
         {/* Right form */}
-        <section className="form-card">
-          <div className="form-head">
-            <p className="progress-kicker small">Step {step} of 2</p>
-            <h1>{isStepOne ? "Sign Up Account" : "Set up your profile"}</h1>
-            <p>
-              {isStepOne
-                ? "Enter your personal data to create your account."
-                : "Tell us more so we can personalize your workspace."}
-            </p>
-          </div>
-
-          <SignupForm step={step} setStep={setStep} />
-
-          {isStepOne && (
-            <div className="form-footer">
-              <span>Already have an account?</span>{" "}
-              <Link href="/login" className="footer-link">
-                Log in
-              </Link>
+        <section className="form-card auth-form-card">
+          <div className="auth-form-scroll">
+            <div className="form-head">
+              <p className="progress-kicker small">Step {step} of 2</p>
+              <h1>{isStepOne ? "Sign Up Account" : "Set up your profile"}</h1>
+              <p>
+                {isStepOne
+                  ? "Enter your personal data to create your account."
+                  : "Tell us more so we can personalize your workspace."}
+              </p>
             </div>
-          )}
+
+            <SignupForm step={step} setStep={setStep} />
+
+            {isStepOne && (
+              <div className="form-footer">
+                <span>Already have an account?</span>{" "}
+                <Link href="/login" className="footer-link">
+                  Log in
+                </Link>
+              </div>
+            )}
+          </div>
         </section>
       </div>
     </PageWrapper>
