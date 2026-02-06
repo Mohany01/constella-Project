@@ -1,0 +1,16 @@
+# virtualenv
+venv/
+.env
+.env.*
+*.env
+
+# python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# local databases
+*.sqlite3
+
+# logs
+*.log
