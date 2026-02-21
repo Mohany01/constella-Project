@@ -4,7 +4,8 @@ front-end/.next/
 .next/
 
 # Backend
-back-end/venv/
+venv/
+.venv/
 back-end/.env
 back-end/.env.*
 *.env

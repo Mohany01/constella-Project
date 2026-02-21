@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Home,
   User,
@@ -14,11 +15,13 @@ import {
   Bell,
   Search,
   HelpCircle,
+  ListChecks,
 } from "lucide-react";
 
 const navigationItems = [
   { id: "dashboard", name: "Dashboard", icon: Home, href: "/dashboard" },
   { id: "projects", name: "Projects", icon: FileText, href: "/projects", badge: "3" },
+  { id: "tasks", name: "Tasks", icon: ListChecks, href: "/tasks" },
   { id: "notifications", name: "Notifications", icon: Bell, href: "/notifications", badge: "12" },
   { id: "profile", name: "Profile", icon: User, href: "/profile" },
   { id: "settings", name: "Settings", icon: Settings, href: "/settings" },
@@ -39,7 +42,7 @@ function getInitials(name) {
   return `${first}${last}`.toUpperCase();
 }
 
-export function Sidebar({ className = "" }) {
+export function Sidebar({ className = "", children }) {
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [activeItem, setActiveItem] = useState("dashboard");
@@ -157,8 +160,8 @@ export function Sidebar({ className = "" }) {
               const isActive = activeItem === item.id;
               return (
                 <li key={item.id}>
-                  <button
-                    type="button"
+                  <Link
+                    href={item.href}
                     onClick={() => handleItemClick(item.id)}
                     className={[
                       "sidebar-item",
@@ -197,7 +200,7 @@ export function Sidebar({ className = "" }) {
                         <span className="sidebar-tooltip-arrow" />
                       </span>
                     )}
-                  </button>
+                  </Link>
                 </li>
               );
             })}
@@ -241,7 +244,7 @@ export function Sidebar({ className = "" }) {
         </div>
       </aside>
 
-      <div className={contentClassName}>{/* Content goes here */}</div>
+      <div className={contentClassName}>{children}</div>
     </>
   );
 }

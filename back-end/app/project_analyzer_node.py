@@ -26,8 +26,15 @@ from pypdf import PdfReader
 # Load environment variables (API keys, etc.)
 load_env()
 
-# Initialize ChatGroq (shared instance, zero temperature for determinism)
-llm = make_llm()
+# Initialize ChatGroq lazily to avoid import-time failures
+_llm = None
+
+
+def _get_llm():
+    global _llm
+    if _llm is None:
+        _llm = make_llm()
+    return _llm
 
 
 def select_pdf_file():
@@ -194,7 +201,7 @@ Rules:
 - `rationale` should be 1-2 sentences explaining why these skills are needed.
 """
 
-    response = llm.invoke(prompt)
+    response = _get_llm().invoke(prompt)
     raw = response.content
     json_text = extract_json_string(raw)
     output_filename = "project_analysis.json"
@@ -242,6 +249,5 @@ Rules:
 
 
     return [AIMessage(content=json_text)]
-
 
 

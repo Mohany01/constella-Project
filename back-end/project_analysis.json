@@ -1,0 +1,145 @@
+{
+  "provided_skills": [],
+  "tasks": [
+    {
+      "name": "Dataset Search",
+      "description": "Search for a dataset from any website like Kaggle with a minimum of 5000 data points",
+      "depends_on": [],
+      "skills": [
+        "Kaggle",
+        "Data Search"
+      ],
+      "start_days_from_kickoff": 0,
+      "duration_days": 2
+    },
+    {
+      "name": "Dataset Description and Objective",
+      "description": "Describe the dataset and objective of the project",
+      "depends_on": [
+        "Dataset Search"
+      ],
+      "skills": [
+        "Data Analysis",
+        "Project Planning"
+      ],
+      "start_days_from_kickoff": 2,
+      "duration_days": 1
+    },
+    {
+      "name": "Data Preprocessing",
+      "description": "Prepare the dataset using preprocessing techniques if needed",
+      "depends_on": [
+        "Dataset Description and Objective"
+      ],
+      "skills": [
+        "Python",
+        "Pandas",
+        "NumPy"
+      ],
+      "start_days_from_kickoff": 3,
+      "duration_days": 2
+    },
+    {
+      "name": "Pre-trained Model Selection",
+      "description": "Choose the most suitable pre-trained model for the problem",
+      "depends_on": [
+        "Data Preprocessing"
+      ],
+      "skills": [
+        "Deep Learning",
+        "Model Selection"
+      ],
+      "start_days_from_kickoff": 5,
+      "duration_days": 1
+    },
+    {
+      "name": "Model Implementation",
+      "description": "Implement a deep learning model from scratch and train/test both models",
+      "depends_on": [
+        "Pre-trained Model Selection"
+      ],
+      "skills": [
+        "Python",
+        "TensorFlow",
+        "PyTorch"
+      ],
+      "start_days_from_kickoff": 6,
+      "duration_days": 4
+    },
+    {
+      "name": "Model Regularization and Evaluation",
+      "description": "Regularize both models using regularization techniques and evaluate the models",
+      "depends_on": [
+        "Model Implementation"
+      ],
+      "skills": [
+        "Regularization Techniques",
+        "Model Evaluation"
+      ],
+      "start_days_from_kickoff": 10,
+      "duration_days": 2
+    },
+    {
+      "name": "Model Optimization",
+      "description": "Modify the neural network layers to improve efficiency and avoid overfitting/underfitting",
+      "depends_on": [
+        "Model Regularization and Evaluation"
+      ],
+      "skills": [
+        "Neural Network Optimization",
+        "Hyperparameter Tuning"
+      ],
+      "start_days_from_kickoff": 12,
+      "duration_days": 2
+    },
+    {
+      "name": "Project Presentation Preparation",
+      "description": "Prepare a PPT presentation of the project",
+      "depends_on": [
+        "Model Optimization"
+      ],
+      "skills": [
+        "Presentation Skills",
+        "PowerPoint"
+      ],
+      "start_days_from_kickoff": 14,
+      "duration_days": 1
+    },
+    {
+      "name": "Project Delivery and Discussion",
+      "description": "Deliver the project and participate in an individual oral discussion",
+      "depends_on": [
+        "Project Presentation Preparation"
+      ],
+      "skills": [
+        "Communication Skills",
+        "Time Management"
+      ],
+      "start_days_from_kickoff": 15,
+      "duration_days": 1
+    }
+  ],
+  "all_skills": [
+    "ai",
+    "communication skills",
+    "data analysis",
+    "data search",
+    "deep learning",
+    "hyperparameter tuning",
+    "kaggle",
+    "model evaluation",
+    "model selection",
+    "neural network optimization",
+    "numpy",
+    "pandas",
+    "powerpoint",
+    "presentation skills",
+    "project planning",
+    "python",
+    "pytorch",
+    "regularization techniques",
+    "tensorflow",
+    "time management"
+  ],
+  "rationale": "The skills required for this project are a combination of data science, deep learning, and presentation skills. The tasks are sequenced to ensure that the project is completed in a logical and efficient manner, with each task building on the previous one."
+}

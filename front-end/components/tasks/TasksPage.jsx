@@ -1,13 +1,13 @@
 "use client";
 
 import { Sidebar } from "../ui/modern-side-bar";
-import ProjectsMain from "./ProjectsMain";
+import TasksBoard from "./TasksBoard";
 
-export default function ProjectPage() {
+export default function TasksPage() {
   return (
     <div className="modern-dashboard">
       <Sidebar>
-        <ProjectsMain />
+        <TasksBoard />
       </Sidebar>
     </div>
   );
