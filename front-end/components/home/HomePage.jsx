@@ -140,7 +140,7 @@ function Hero() {
         <Reveal delay={160}>
           <div className="hero-cta">
             <div className="hero-buttons">
-              <Link href="/dashboard" className="pill-button pill-button-primary pill-button-lg">
+              <Link href="/login" className="pill-button pill-button-primary pill-button-lg">
                 Get started
               </Link>
             </div>

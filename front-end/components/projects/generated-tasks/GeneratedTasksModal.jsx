@@ -81,7 +81,13 @@ function useLockBodyScroll(isOpen) {
   }, [isOpen]);
 }
 
-export default function GeneratedTasksModal({ open, onClose, onSave, analysis }) {
+export default function GeneratedTasksModal({
+  open,
+  onClose,
+  onSave,
+  analysis,
+  isSaved = false,
+}) {
   const [tasks, setTasks] = useState([]);
   const [originalTasks, setOriginalTasks] = useState([]);
   const [hoveredDependency, setHoveredDependency] = useState(null);
@@ -90,6 +96,7 @@ export default function GeneratedTasksModal({ open, onClose, onSave, analysis })
   const modalRef = useRef(null);
   const [isVisible, setIsVisible] = useState(open);
   const [isClosing, setIsClosing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const closeTimerRef = useRef(null);
 
   useLockBodyScroll(isVisible);
@@ -114,6 +121,10 @@ export default function GeneratedTasksModal({ open, onClose, onSave, analysis })
   }, [open, isVisible]);
 
   const scheduledTasks = useMemo(() => computeSchedule(tasks), [tasks]);
+  const originalScheduled = useMemo(
+    () => computeSchedule(originalTasks),
+    [originalTasks]
+  );
   const cycleDetails = useMemo(() => detectCycleDetails(tasks), [tasks]);
   const cycleWarning = cycleDetails.hasCycle
     ? "Schedule conflict: circular dependency detected."
@@ -140,6 +151,20 @@ export default function GeneratedTasksModal({ open, onClose, onSave, analysis })
     return ids;
   }, [hoveredDependency, scheduledTasks]);
 
+  const currentSnapshot = useMemo(
+    () => sanitizeTasksForSave(scheduledTasks),
+    [scheduledTasks]
+  );
+  const originalSnapshot = useMemo(
+    () => sanitizeTasksForSave(originalScheduled),
+    [originalScheduled]
+  );
+  const hasChanges = useMemo(
+    () => JSON.stringify(currentSnapshot) !== JSON.stringify(originalSnapshot),
+    [currentSnapshot, originalSnapshot]
+  );
+  const showSaveButton = !isSaved || hasChanges;
+
   useEffect(() => {
     if (!open) return;
     const sourceTasks = analysis?.analysis?.tasks || [];
@@ -155,6 +180,25 @@ export default function GeneratedTasksModal({ open, onClose, onSave, analysis })
     setHoveredDependency(null);
   }, [analysis, open]);
 
+  const handleCloseRequest = () => {
+    if (isSaving) return;
+    if (!showSaveButton) {
+      onClose?.();
+      return;
+    }
+    showAlert({
+      type: "confirm",
+      tone: "warning",
+      title: "Close without saving?",
+      message: "If you close now, this project will not be saved.",
+      confirmLabel: "Close anyway",
+      onConfirm: () => {
+        setAlert(null);
+        onClose?.({ discard: true });
+      },
+    });
+  };
+
   useEffect(() => {
     if (!open) return;
     const modal = modalRef.current;
@@ -167,7 +211,7 @@ export default function GeneratedTasksModal({ open, onClose, onSave, analysis })
 
     const handleKeyDown = (event) => {
       if (event.key === "Escape") {
-        onClose?.();
+        handleCloseRequest();
       }
       if (event.key === "Tab" && focusable.length > 0) {
         if (event.shiftKey && document.activeElement === first) {
@@ -183,7 +227,7 @@ export default function GeneratedTasksModal({ open, onClose, onSave, analysis })
     document.addEventListener("keydown", handleKeyDown);
     first?.focus();
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  }, [open]);
 
   const handleRename = (taskId, nextName) => {
     setTasks((prev) => {
@@ -353,7 +397,7 @@ export default function GeneratedTasksModal({ open, onClose, onSave, analysis })
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!analysis) {
       onClose?.();
       return;
@@ -369,8 +413,20 @@ export default function GeneratedTasksModal({ open, onClose, onSave, analysis })
         original_tasks: originalPayload,
       },
     };
-    onSave?.(updated);
-    onClose?.();
+    try {
+      setIsSaving(true);
+      await onSave?.(updated);
+      onClose?.();
+    } catch (err) {
+      showAlert({
+        type: "error",
+        tone: "danger",
+        title: "Save failed",
+        message: err?.message || "Unable to save project right now.",
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleResetToAgent = () => {
@@ -427,18 +483,20 @@ export default function GeneratedTasksModal({ open, onClose, onSave, analysis })
             >
               Reset to agent
             </button>
-            <button
-              className="ws-btn ws-btn-primary"
-              type="button"
-              onClick={handleSave}
-              disabled={cycleDetails.hasCycle}
-            >
-              Save tasks
-            </button>
+            {showSaveButton && (
+              <button
+                className="ws-btn ws-btn-primary"
+                type="button"
+                onClick={handleSave}
+                disabled={cycleDetails.hasCycle || isSaving}
+              >
+                {isSaving ? "Saving..." : "Save tasks"}
+              </button>
+            )}
             <button
               className="ws-modal-close"
               type="button"
-              onClick={onClose}
+              onClick={handleCloseRequest}
               aria-label="Close"
             >
               <X size={16} />

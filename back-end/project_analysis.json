@@ -3,7 +3,7 @@
   "tasks": [
     {
       "name": "Dataset Search",
-      "description": "Search for a dataset from any website like Kaggle with a minimum of 5000 data points",
+      "description": "Search for a dataset from any website like Kaggle with at least 5000 data points",
       "depends_on": [],
       "skills": [
         "Kaggle",
@@ -13,14 +13,14 @@
       "duration_days": 2
     },
     {
-      "name": "Dataset Description and Objective",
+      "name": "Dataset Description",
       "description": "Describe the dataset and objective of the project",
       "depends_on": [
         "Dataset Search"
       ],
       "skills": [
         "Data Analysis",
-        "Project Planning"
+        "Writing"
       ],
       "start_days_from_kickoff": 2,
       "duration_days": 1
@@ -29,7 +29,7 @@
       "name": "Data Preprocessing",
       "description": "Prepare the dataset using preprocessing techniques if needed",
       "depends_on": [
-        "Dataset Description and Objective"
+        "Dataset Description"
       ],
       "skills": [
         "Python",
@@ -81,7 +81,7 @@
     },
     {
       "name": "Model Optimization",
-      "description": "Modify the neural network layers to improve efficiency and avoid overfitting/underfitting",
+      "description": "Modify the neural network layers to improve efficiency",
       "depends_on": [
         "Model Regularization and Evaluation"
       ],
@@ -93,35 +93,21 @@
       "duration_days": 2
     },
     {
-      "name": "Project Presentation Preparation",
-      "description": "Prepare a PPT presentation of the project",
+      "name": "Project Presentation",
+      "description": "Create a PPT presentation of the project",
       "depends_on": [
         "Model Optimization"
       ],
       "skills": [
-        "Presentation Skills",
-        "PowerPoint"
+        "Presentation",
+        "Writing"
       ],
       "start_days_from_kickoff": 14,
-      "duration_days": 1
-    },
-    {
-      "name": "Project Delivery and Discussion",
-      "description": "Deliver the project and participate in an individual oral discussion",
-      "depends_on": [
-        "Project Presentation Preparation"
-      ],
-      "skills": [
-        "Communication Skills",
-        "Time Management"
-      ],
-      "start_days_from_kickoff": 15,
       "duration_days": 1
     }
   ],
   "all_skills": [
     "ai",
-    "communication skills",
     "data analysis",
     "data search",
     "deep learning",
@@ -132,14 +118,12 @@
     "neural network optimization",
     "numpy",
     "pandas",
-    "powerpoint",
-    "presentation skills",
-    "project planning",
+    "presentation",
     "python",
     "pytorch",
     "regularization techniques",
     "tensorflow",
-    "time management"
+    "writing"
   ],
-  "rationale": "The skills required for this project are a combination of data science, deep learning, and presentation skills. The tasks are sequenced to ensure that the project is completed in a logical and efficient manner, with each task building on the previous one."
+  "rationale": "The skills required for this project are a combination of data science, deep learning, and presentation skills. These skills are necessary to complete the tasks outlined in the project, including dataset search, model implementation, and project presentation."
 }

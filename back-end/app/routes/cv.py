@@ -45,7 +45,7 @@ async def extract_cv(
             **result,
         }
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail={"code": "BAD_REQUEST"}) from exc
 
 @router.post("/save-skills")
 def save_skills(payload: SkillSaveRequest, user=Depends(get_current_user)):
@@ -55,11 +55,11 @@ def save_skills(payload: SkillSaveRequest, user=Depends(get_current_user)):
 
     emp_id = user.get("id")
     if not emp_id:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
 
     conn = get_connection()
     if conn is None:
-        raise HTTPException(status_code=500, detail="Database connection not available.")
+        raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
     cur = conn.cursor()
 
     try:

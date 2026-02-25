@@ -14,10 +14,10 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_sche
     if not credentials or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid Authorization header",
+            detail={"code": "UNAUTHORIZED"},
         )
     if not JWT_SECRET:
-        raise HTTPException(status_code=500, detail="JWT secret not configured")
+        raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
 
     token = credentials.credentials
     try:
@@ -25,7 +25,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(bearer_sche
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
+            detail={"code": "UNAUTHORIZED"},
         )
 
 
@@ -35,6 +35,6 @@ def get_current_user(payload=Depends(verify_token)):
     email = payload.get("email")
     if not user_id or not email:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail={"code": "UNAUTHORIZED"}
         )
     return {"id": str(user_id), "email": email}

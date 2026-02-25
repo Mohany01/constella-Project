@@ -66,6 +66,9 @@ class ProjectInput(BaseModel):
 
     skills: List[str] = Field(default_factory=list, description="Initial skills the user believes are needed")
     description: str = Field("", description="Freeform project description")
+    project_deadline_days: int = Field(
+        0, description="Requested project deadline in days (0 means no strict deadline)"
+    )
 
     @validator("skills", pre=True, always=True)
     def _coerce_skills(cls, value):
@@ -76,6 +79,14 @@ class ProjectInput(BaseModel):
         if isinstance(value, str):
             return [s.strip() for s in value.split(",") if s.strip()]
         return []
+
+    @validator("project_deadline_days", pre=True, always=True)
+    def _coerce_deadline_days(cls, value):
+        try:
+            parsed = int(value)
+            return max(0, parsed)
+        except Exception:
+            return 0
 
 
 class ProjectTask(BaseModel):
@@ -130,8 +141,8 @@ def extract_json_string(content: Any) -> str:
     return text.strip()
 
 
-def parse_project_from_state(state: List[BaseMessage]) -> Tuple[List[str], str]:
-    """Pull provided skills and description from the first HumanMessage."""
+def parse_project_from_state(state: List[BaseMessage]) -> Tuple[List[str], str, int]:
+    """Pull provided skills, description, and deadline from the first HumanMessage."""
 
     for msg in state:
         if not isinstance(msg, HumanMessage):
@@ -141,7 +152,7 @@ def parse_project_from_state(state: List[BaseMessage]) -> Tuple[List[str], str]:
         try:
             payload = json.loads(extract_json_string(msg.content))
             parsed = ProjectInput(**payload)
-            return parsed.skills, parsed.description
+            return parsed.skills, parsed.description, parsed.project_deadline_days
         except Exception:
             pass
 
@@ -149,23 +160,71 @@ def parse_project_from_state(state: List[BaseMessage]) -> Tuple[List[str], str]:
         text = str(msg.content)
         skills = []
         description = text
+        deadline_days = 0
         for line in text.splitlines():
             if line.lower().startswith("skills:"):
                 skills_str = line.split(":", 1)[1]
                 skills = [s.strip() for s in skills_str.split(",") if s.strip()]
             if line.lower().startswith("description:"):
                 description = line.split(":", 1)[1].strip()
+            if line.lower().startswith(("deadline_days:", "project_deadline_days:", "project_duration_days:")):
+                try:
+                    deadline_days = max(0, int(line.split(":", 1)[1].strip()))
+                except Exception:
+                    deadline_days = 0
 
         if skills or description:
-            return skills, description
+            return skills, description, deadline_days
 
-    return [], ""
+    return [], "", 0
+
+
+def fit_tasks_to_deadline(tasks: List[ProjectTask], deadline_days: int) -> List[ProjectTask]:
+    """
+    Compress and resequence tasks to finish within deadline when possible.
+    Keeps task order and dependencies intact while reducing durations proportionally.
+    """
+    if deadline_days <= 0 or not tasks:
+        return tasks
+
+    ordered = list(tasks)
+    original_total = sum(max(1, int(t.duration_days)) for t in ordered)
+    if original_total <= deadline_days:
+        day = 0
+        for t in ordered:
+            t.start_days_from_kickoff = day
+            t.duration_days = max(1, int(t.duration_days))
+            day += t.duration_days
+        return ordered
+
+    scale = deadline_days / float(original_total)
+    scaled_durations = [
+        max(1, int(round(max(1, t.duration_days) * scale))) for t in ordered
+    ]
+
+    while sum(scaled_durations) > deadline_days:
+        changed = False
+        for i in range(len(scaled_durations) - 1, -1, -1):
+            if scaled_durations[i] > 1:
+                scaled_durations[i] -= 1
+                changed = True
+                if sum(scaled_durations) <= deadline_days:
+                    break
+        if not changed:
+            break
+
+    day = 0
+    for idx, t in enumerate(ordered):
+        t.start_days_from_kickoff = day
+        t.duration_days = scaled_durations[idx]
+        day += t.duration_days
+    return ordered
 
 
 def project_analyzer_node(state: List[BaseMessage]) -> List[BaseMessage]:
     """LangGraph node that returns an AIMessage with a skills analysis JSON."""
 
-    provided_skills, description = parse_project_from_state(state)
+    provided_skills, description, project_deadline_days = parse_project_from_state(state)
 
     prompt = f"""
 You are a project skill analyst.
@@ -176,6 +235,7 @@ Project description:
 {description or "(none provided)"}
 
 Initial skills (may be empty): {', '.join(provided_skills) if provided_skills else '(none)'}
+Requested deadline (days): {project_deadline_days if project_deadline_days > 0 else 'not specified'}
 
 Rules:
 - Output valid JSON matching this schema exactly:
@@ -197,6 +257,7 @@ Rules:
 - Break the project into 6–12 concrete tasks with clear sequencing; `depends_on` should reference other task names (use [] for the first tasks).
 - Each task's `skills` should list only the skills/tools specific to that task (no sentences).
 - Provide rough timing: `start_days_from_kickoff` as an integer offset (0 for day one), and `duration_days` as how long the task takes once started.
+- If a deadline is provided (>0), schedule tasks so the final task ends on or before that day.
 - Keep skills concise (skill or tool names only, no sentences).
 - `rationale` should be 1-2 sentences explaining why these skills are needed.
 """
@@ -209,6 +270,8 @@ Rules:
     try:
         parsed = json.loads(json_text)
         validated = ProjectAnalysisOutput(**parsed)
+        if project_deadline_days > 0:
+            validated.tasks = fit_tasks_to_deadline(validated.tasks, project_deadline_days)
 
         # --- Skill Expansion ---
         skills_graph = create_skills_graph()
@@ -249,5 +312,3 @@ Rules:
 
 
     return [AIMessage(content=json_text)]
-
-
