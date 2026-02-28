@@ -20,6 +20,23 @@ MAX_PDF_CHARS = 8000
 TASK_HOURS_PER_DAY = int(os.getenv("TASK_HOURS_PER_DAY", "8"))
 
 
+def _resolve_task_duration(task: Dict[str, Any]) -> int:
+    duration = task.get("duration_days")
+    if duration is None:
+        estimated = task.get("estimated_hours")
+        if estimated is not None:
+            try:
+                duration = max(1, int((float(estimated) + TASK_HOURS_PER_DAY - 1) // TASK_HOURS_PER_DAY))
+            except Exception:
+                duration = 1
+        else:
+            duration = 1
+    try:
+        return max(1, int(duration))
+    except Exception:
+        return 1
+
+
 class TeamBuildRequest(BaseModel):
     project_name: str = Field(..., min_length=1)
     analysis: Dict[str, Any] = Field(default_factory=dict)
@@ -172,6 +189,7 @@ def list_projects(user=Depends(get_current_user)):
             project_id: [] for project_id in project_ids
         }
 
+        tasks_by_id: Dict[int, Dict[str, Any]] = {}
         if project_ids:
             task_columns = _get_table_columns(cur, "task")
             if "project_id" in task_columns and "name" in task_columns:
@@ -203,7 +221,6 @@ def list_projects(user=Depends(get_current_user)):
                     )
                     task_rows = cur.fetchall()
                     task_cols = [desc[0] for desc in cur.description]
-                    tasks_by_id: Dict[int, Dict[str, Any]] = {}
                     for row in task_rows:
                         task = dict(zip(task_cols, row))
                         if "deadline" in task:
@@ -307,14 +324,397 @@ def list_projects(user=Depends(get_current_user)):
                                 if task_id in tasks_by_id:
                                     tasks_by_id[task_id]["skills"].append(skill_name)
 
+        team_by_project: Dict[int, Dict[str, Any]] = {}
+        if project_ids and tasks_by_id:
+            cur.execute(
+                """
+                SELECT t.project_id,
+                       e.id,
+                       e.name,
+                       e.email,
+                       e.role,
+                       t.task_id,
+                       t.name
+                FROM employee_task et
+                JOIN task t ON t.task_id = et.task_id
+                JOIN employee e ON e.id = et.emp_id
+                WHERE t.project_id = ANY(%s)
+                ORDER BY t.project_id, e.name, t.name
+                """,
+                (project_ids,),
+            )
+            assignment_rows = cur.fetchall()
+
+            members_map: Dict[int, Dict[str, Dict[str, Any]]] = {}
+            assigned_tasks: Dict[int, set] = {}
+
+            for proj_id, emp_id, emp_name, emp_email, emp_role, task_id, task_name in assignment_rows:
+                task = tasks_by_id.get(task_id, {})
+                start_day = task.get("start_days_from_kickoff") or 0
+                duration = _resolve_task_duration(task)
+                end_day = start_day + duration
+                skills = task.get("skills") or []
+                assigned_tasks.setdefault(proj_id, set()).add(task_name)
+
+                project_members = members_map.setdefault(proj_id, {})
+                member_entry = project_members.setdefault(
+                    str(emp_id),
+                    {
+                        "employee_id": str(emp_id),
+                        "employee_filename": emp_name or "Member",
+                        "employee_email": emp_email,
+                        "employee_role": emp_role,
+                        "assignments": [],
+                    },
+                )
+                member_entry["assignments"].append(
+                    {
+                        "task_name": task_name,
+                        "start_day": int(start_day),
+                        "end_day": int(end_day),
+                        "skills_match": [],
+                        "missing_skills": skills,
+                        "semantic_match_score": 0,
+                    }
+                )
+
+            for proj_id in project_ids:
+                if proj_id not in members_map and proj_id not in assigned_tasks:
+                    continue
+                team_list = list(members_map.get(proj_id, {}).values())
+                unassigned = []
+                for task in tasks_by_project.get(proj_id, []):
+                    task_name = task.get("name")
+                    if task_name and task_name not in assigned_tasks.get(proj_id, set()):
+                        unassigned.append(task_name)
+                team_by_project[proj_id] = {
+                    "team": team_list,
+                    "unassigned_tasks": unassigned,
+                    "num_employees": len(team_list),
+                    "rationale": "Loaded from saved assignments.",
+                }
+
         projects: List[Dict[str, Any]] = []
         for row in rows:
             project_dict = _project_row_to_dict(row)
             if project_dict:
                 project_id = project_dict.get("project_id")
                 project_dict["tasks"] = tasks_by_project.get(project_id, [])
+                if project_id in team_by_project:
+                    project_dict["team"] = team_by_project[project_id]
                 projects.append(project_dict)
         return {"projects": projects}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"}) from exc
+    finally:
+        cur.close()
+        release_connection(conn)
+
+
+def _load_project_tasks(cur, project_id: int):
+    tasks_by_project: Dict[int, List[Dict[str, Any]]] = {project_id: []}
+    tasks_by_id: Dict[int, Dict[str, Any]] = {}
+
+    task_columns = _get_table_columns(cur, "task")
+    if "project_id" not in task_columns or "name" not in task_columns:
+        return tasks_by_project, tasks_by_id
+
+    select_cols = [
+        col
+        for col in (
+            "task_id",
+            "project_id",
+            "name",
+            "description",
+            "status",
+            "estimated_hours",
+            "priority",
+            "deadline",
+            "start_days_from_kickoff",
+            "duration_days",
+        )
+        if col in task_columns
+    ]
+    if not select_cols:
+        return tasks_by_project, tasks_by_id
+
+    cur.execute(
+        f"""
+        SELECT {", ".join(select_cols)}
+        FROM task
+        WHERE project_id = %s
+        ORDER BY task_id
+        """,
+        (project_id,),
+    )
+    task_rows = cur.fetchall()
+    task_cols = [desc[0] for desc in cur.description]
+    for row in task_rows:
+        task = dict(zip(task_cols, row))
+        if "deadline" in task:
+            task["deadline"] = _serialize_task_value(task["deadline"])
+        task.setdefault("depends_on", [])
+        task.setdefault("skills", [])
+        tasks_by_project[project_id].append(task)
+        if "task_id" in task and task["task_id"] is not None:
+            tasks_by_id[task["task_id"]] = task
+
+    task_ids = list(tasks_by_id.keys())
+    if not task_ids:
+        return tasks_by_project, tasks_by_id
+
+    task_dependency_columns = _get_table_columns(cur, "task_dependency")
+    dep_id_cols = [
+        col
+        for col in (
+            "dependent_on_task_id",
+            "depends_on_task_id",
+            "dependency_task_id",
+            "depends_on_id",
+            "dependency_id",
+        )
+        if col in task_dependency_columns
+    ]
+    dep_name_cols = [
+        col
+        for col in ("depends_on_name", "dependency_name")
+        if col in task_dependency_columns
+    ]
+
+    if task_dependency_columns and "task_id" in task_dependency_columns:
+        select_dep_cols = ["task_id"]
+        if dep_id_cols:
+            select_dep_cols.append(dep_id_cols[0])
+        elif dep_name_cols:
+            select_dep_cols.append(dep_name_cols[0])
+        if len(select_dep_cols) > 1:
+            if "project_id" in task_dependency_columns:
+                cur.execute(
+                    f"""
+                    SELECT {", ".join(select_dep_cols)}
+                    FROM task_dependency
+                    WHERE project_id = %s
+                    """,
+                    (project_id,),
+                )
+            else:
+                cur.execute(
+                    f"""
+                    SELECT {", ".join(select_dep_cols)}
+                    FROM task_dependency
+                    WHERE task_id = ANY(%s)
+                    """,
+                    (task_ids,),
+                )
+            dep_rows = cur.fetchall()
+            dep_cols = [desc[0] for desc in cur.description]
+            for dep_row in dep_rows:
+                dep = dict(zip(dep_cols, dep_row))
+                task_id = dep.get("task_id")
+                if task_id not in tasks_by_id:
+                    continue
+                if dep_id_cols and dep_id_cols[0] in dep:
+                    dep_task_id = dep.get(dep_id_cols[0])
+                    dep_task = tasks_by_id.get(dep_task_id)
+                    if dep_task and dep_task.get("name"):
+                        tasks_by_id[task_id]["depends_on"].append(dep_task["name"])
+                elif dep_name_cols and dep_name_cols[0] in dep:
+                    dep_name = dep.get(dep_name_cols[0])
+                    if dep_name:
+                        tasks_by_id[task_id]["depends_on"].append(dep_name)
+
+    task_skill_columns = _get_table_columns(cur, "task_skill")
+    skill_columns = _get_table_columns(cur, "skill")
+    if (
+        task_skill_columns
+        and "task_id" in task_skill_columns
+        and "skill_id" in task_skill_columns
+        and "skill_id" in skill_columns
+        and "name" in skill_columns
+    ):
+        cur.execute(
+            """
+            SELECT ts.task_id, s.name
+            FROM task_skill ts
+            JOIN skill s ON s.skill_id = ts.skill_id
+            WHERE ts.task_id = ANY(%s)
+            """,
+            (task_ids,),
+        )
+        skill_rows = cur.fetchall()
+        for task_id, skill_name in skill_rows:
+            if task_id in tasks_by_id:
+                tasks_by_id[task_id]["skills"].append(skill_name)
+
+    return tasks_by_project, tasks_by_id
+
+
+def _load_project_team(cur, project_id: int, tasks_by_project, tasks_by_id):
+    members_map: Dict[str, Dict[str, Any]] = {}
+    assigned_task_names: set = set()
+
+    if tasks_by_id:
+        cur.execute(
+            """
+            SELECT t.project_id,
+                   e.id,
+                   e.name,
+                   e.email,
+                   e.role,
+                   t.task_id,
+                   t.name
+            FROM employee_task et
+            JOIN task t ON t.task_id = et.task_id
+            JOIN employee e ON e.id = et.emp_id
+            WHERE t.project_id = %s
+            ORDER BY e.name, t.name
+            """,
+            (project_id,),
+        )
+        assignment_rows = cur.fetchall()
+
+        for _, emp_id, emp_name, emp_email, emp_role, task_id, task_name in assignment_rows:
+            task = tasks_by_id.get(task_id, {})
+            start_day = task.get("start_days_from_kickoff") or 0
+            duration = _resolve_task_duration(task)
+            end_day = start_day + duration
+            skills = task.get("skills") or []
+            assigned_task_names.add(task_name)
+
+            member_entry = members_map.setdefault(
+                str(emp_id),
+                {
+                    "employee_id": str(emp_id),
+                    "employee_filename": emp_name or "Member",
+                    "employee_email": emp_email,
+                    "employee_role": emp_role,
+                    "assignments": [],
+                },
+            )
+            member_entry["assignments"].append(
+                {
+                    "task_name": task_name,
+                    "start_day": int(start_day),
+                    "end_day": int(end_day),
+                    "skills_match": [],
+                    "missing_skills": skills,
+                    "semantic_match_score": 0,
+                }
+            )
+
+    unassigned = []
+    for task in tasks_by_project.get(project_id, []):
+        task_name = task.get("name")
+        if task_name and task_name not in assigned_task_names:
+            unassigned.append(task_name)
+
+    team_list = list(members_map.values())
+    return {
+        "team": team_list,
+        "unassigned_tasks": unassigned,
+        "num_employees": len(team_list),
+        "rationale": "Loaded from saved assignments.",
+    }
+
+
+@router.get("/employees")
+def list_employees(user=Depends(get_current_user)):
+    manager_id = user.get("id")
+    if not manager_id:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
+
+    conn = get_connection()
+    if conn is None:
+        raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
+    cur = conn.cursor()
+
+    try:
+        cur.execute("SELECT id, name, email, role FROM employee ORDER BY name, email")
+        rows = cur.fetchall()
+        employees = [
+            {"id": str(emp_id), "name": name, "email": email, "role": role}
+            for emp_id, name, email, role in rows
+        ]
+        return {"employees": employees}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"}) from exc
+    finally:
+        cur.close()
+        release_connection(conn)
+
+
+@router.get("/{project_id}")
+def get_project(
+    project_id: int,
+    user=Depends(get_current_user),
+):
+    manager_id = user.get("id")
+    if not manager_id:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
+
+    conn = get_connection()
+    if conn is None:
+        raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            """
+            SELECT project_id, name, description, budget, start_date, end_date, deadline, manager_id
+            FROM project
+            WHERE project_id = %s AND manager_id = %s
+            """,
+            (project_id, manager_id),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+
+        project_dict = _project_row_to_dict(row)
+        tasks_by_project, tasks_by_id = _load_project_tasks(cur, project_id)
+        project_dict["tasks"] = tasks_by_project.get(project_id, [])
+        team_payload = _load_project_team(
+            cur, project_id, tasks_by_project, tasks_by_id
+        )
+        if team_payload["team"] or team_payload["unassigned_tasks"]:
+            project_dict["team"] = team_payload
+        return project_dict
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"}) from exc
+    finally:
+        cur.close()
+        release_connection(conn)
+
+
+@router.get("/{project_id}/team")
+def get_project_team(project_id: int, user=Depends(get_current_user)):
+    manager_id = user.get("id")
+    if not manager_id:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
+
+    conn = get_connection()
+    if conn is None:
+        raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
+    cur = conn.cursor()
+
+    try:
+        cur.execute(
+            "SELECT project_id FROM project WHERE project_id = %s AND manager_id = %s",
+            (project_id, manager_id),
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+
+        tasks_by_project, tasks_by_id = _load_project_tasks(cur, project_id)
+        team_payload = _load_project_team(cur, project_id, tasks_by_project, tasks_by_id)
+        return {
+            "project_id": project_id,
+            **team_payload,
+        }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"}) from exc
     finally:

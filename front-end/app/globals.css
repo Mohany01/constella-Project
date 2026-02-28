@@ -45,6 +45,12 @@
     --sidebar-accent-foreground: 240 5.9% 10%;
     --sidebar-border: 220 13% 91%;
     --sidebar-ring: 217.2 91.2% 59.8%;
+    --tb-interact-raise: -2px;
+    --tb-interact-press: 1px;
+    --tb-interact-shadow: 0 12px 26px rgba(0, 0, 0, 0.35);
+    --tb-focus-ring: 0 0 0 2px rgba(182, 19, 235, 0.6);
+    --tb-radius-md: 12px;
+    --tb-radius-pill: 999px;
   }
   .dark {
     --background: 0 0% 3.9%;
@@ -80,6 +86,27 @@
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
   }
+}
+
+.tb-interactive {
+  transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.18s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.18s ease,
+    background 0.18s ease;
+}
+
+.tb-interactive:hover {
+  transform: translateY(var(--tb-interact-raise));
+  box-shadow: var(--tb-interact-shadow);
+}
+
+.tb-interactive:active {
+  transform: translateY(var(--tb-interact-press)) scale(0.98);
+}
+
+.tb-interactive:focus-visible {
+  outline: none;
+  box-shadow: var(--tb-focus-ring);
 }
 
 @layer base {

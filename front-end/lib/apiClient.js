@@ -73,7 +73,7 @@ export async function apiClient(url, options = {}) {
   let res;
   try {
     res = await fetch(`${BASE_URL}${url}`, requestOptions);
-  } catch {
+  } catch (err) {
     throw new Error("Network error. Please check your connection.");
   }
 

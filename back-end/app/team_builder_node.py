@@ -28,6 +28,7 @@ class EmployeeSkill(BaseModel):
 
     employee_id: str | None = None
     name: str | None = None
+    email: str | None = None
     filename: str
     summary: Dict[str, List[str]]
 
@@ -53,6 +54,7 @@ class TeamMember(BaseModel):
     """Represents a team member and all their assigned tasks."""
 
     employee_id: str | None = None
+    employee_email: str | None = None
     employee_filename: str
     assignments: List[EmployeeAssignment]
 
@@ -90,7 +92,7 @@ def load_employee_skills_from_db() -> List[EmployeeSkill]:
     try:
         cur.execute(
             """
-            SELECT e.id, e.name, s.name
+            SELECT e.id, e.name, e.email, s.name
             FROM employee e
             LEFT JOIN employee_skill es ON e.id = es.emp_id
             LEFT JOIN skill s ON es.skill_id = s.skill_id
@@ -103,7 +105,7 @@ def load_employee_skills_from_db() -> List[EmployeeSkill]:
         release_connection(conn)
 
     employees: Dict[str, Dict[str, Any]] = {}
-    for emp_id, name, skill_name in rows:
+    for emp_id, name, email, skill_name in rows:
         key = str(emp_id)
         display_name = (name or "Employee").strip() or "Employee"
         entry = employees.setdefault(
@@ -111,6 +113,7 @@ def load_employee_skills_from_db() -> List[EmployeeSkill]:
             {
                 "employee_id": key,
                 "name": display_name,
+                "email": email,
                 "filename": display_name,
                 "summary": {"skills": []},
             },
@@ -261,6 +264,7 @@ def team_builder_node(state: TeamBuilderState) -> Dict[str, Any]:
         display_name = (emp.name or emp.filename or "Employee").strip() or "Employee"
         employees[key] = {
             "display_name": display_name,
+            "email": emp.email,
             "skills": list(
                 set(
                     skill.lower()
@@ -480,6 +484,7 @@ def team_builder_node(state: TeamBuilderState) -> Dict[str, Any]:
     team_members = [
         TeamMember(
             employee_id=emp_id,
+            employee_email=employees[emp_id].get("email"),
             employee_filename=employees[emp_id]["display_name"],
             assignments=emp_assignments,
         )

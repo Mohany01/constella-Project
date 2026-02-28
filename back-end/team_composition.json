@@ -1,7 +1,26 @@
 {
   "team": [
     {
+      "employee_id": "hjkl,.dfxg",
+      "employee_email": "bayanhaitham871@gmail.com",
+      "employee_filename": "beno",
+      "assignments": [
+        {
+          "task_name": "Dataset Description and Objective",
+          "start_day": 1,
+          "end_day": 2,
+          "skills_match": [
+            "data analysis",
+            "project planning"
+          ],
+          "missing_skills": [],
+          "semantic_match_score": 0.8899269104003906
+        }
+      ]
+    },
+    {
       "employee_id": "58ac6691fe2b452b8494",
+      "employee_email": "c@gmail.com",
       "employee_filename": "c",
       "assignments": [
         {
@@ -20,6 +39,7 @@
     },
     {
       "employee_id": "f830b7ed39e147018cdc",
+      "employee_email": "l@gmail.com",
       "employee_filename": "l",
       "assignments": [
         {
@@ -27,9 +47,9 @@
           "start_day": 2,
           "end_day": 3,
           "skills_match": [
-            "python",
             "pandas",
-            "numpy"
+            "numpy",
+            "python"
           ],
           "missing_skills": [],
           "semantic_match_score": 0.6913579106330872
@@ -54,8 +74,8 @@
             "python"
           ],
           "missing_skills": [
-            "pytorch",
-            "tensorflow"
+            "tensorflow",
+            "pytorch"
           ],
           "semantic_match_score": 0.6154201626777649
         }
@@ -63,6 +83,7 @@
     },
     {
       "employee_id": "71a7fd7905fd4df6b6d1",
+      "employee_email": "n@gmail.com",
       "employee_filename": "n",
       "assignments": [
         {
@@ -87,23 +108,6 @@
           ],
           "missing_skills": [],
           "semantic_match_score": 0.5080390572547913
-        }
-      ]
-    },
-    {
-      "employee_id": "ddce252b686a4ba18796",
-      "employee_filename": "\u0646",
-      "assignments": [
-        {
-          "task_name": "Dataset Description and Objective",
-          "start_day": 1,
-          "end_day": 2,
-          "skills_match": [
-            "project planning",
-            "data analysis"
-          ],
-          "missing_skills": [],
-          "semantic_match_score": 0.8899269104003906
         }
       ]
     }

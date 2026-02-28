@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CloudUpload, FileText, X } from "lucide-react";
+import { CheckCircle, CloudUpload, FileText, Loader2, X } from "lucide-react";
 import { apiClient } from "../../lib/apiClient";
 import GeneratedTasksModal from "./generated-tasks/GeneratedTasksModal";
-import AiLoader from "../ui/ai-loader";
 
 const STEP_TOTAL = 3;
+const LOADING_PROGRESS_CAP = 94;
+const LOADING_EXIT_DELAY = 900;
 
 const DURATION_PRESETS = [
   { label: "1 wk", value: 7 },
@@ -32,11 +33,14 @@ const BRIEF_OPTIONS = [
 
 function useLockBodyScroll(isOpen) {
   useEffect(() => {
-    if (!isOpen) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    if (!isOpen || typeof document === "undefined") return;
+    const { body } = document;
+    const previous = body.style.overflow;
+    body.classList.add("app-modal-open");
+    body.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = previous;
+      body.classList.remove("app-modal-open");
+      body.style.overflow = previous;
     };
   }, [isOpen]);
 }
@@ -251,11 +255,15 @@ export function ProjectAnalyzerModal({ open, onClose, onComplete }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showLoader, setShowLoader] = useState(false);
   const [isLoaderExiting, setIsLoaderExiting] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [isLoaderSuccess, setIsLoaderSuccess] = useState(false);
   const [isVisible, setIsVisible] = useState(open);
   const [isClosing, setIsClosing] = useState(false);
   const [isScrollable, setIsScrollable] = useState(false);
   const closeTimerRef = useRef(null);
   const loaderTimerRef = useRef(null);
+  const progressIntervalRef = useRef(null);
+  const successCloseRef = useRef(null);
   const modalRef = useRef(null);
   const bodyRef = useRef(null);
   const isUploadMode = briefType === "pdf";
@@ -286,6 +294,19 @@ export function ProjectAnalyzerModal({ open, onClose, onComplete }) {
 
   useEffect(() => {
     if (isSubmitting) {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+      setLoadingProgress(0);
+      setIsLoaderSuccess(false);
+      progressIntervalRef.current = setInterval(() => {
+        setLoadingProgress((prev) => {
+          if (prev >= LOADING_PROGRESS_CAP) return prev;
+          const remaining = LOADING_PROGRESS_CAP - prev;
+          const bump = Math.max(1, Math.round(remaining * 0.12));
+          return Math.min(LOADING_PROGRESS_CAP, prev + bump);
+        });
+      }, 260);
       if (loaderTimerRef.current) {
         clearTimeout(loaderTimerRef.current);
         loaderTimerRef.current = null;
@@ -294,13 +315,20 @@ export function ProjectAnalyzerModal({ open, onClose, onComplete }) {
       setIsLoaderExiting(false);
       return;
     }
+    if (progressIntervalRef.current) {
+      clearInterval(progressIntervalRef.current);
+      progressIntervalRef.current = null;
+    }
+    setLoadingProgress(100);
     if (!showLoader) return;
-    setIsLoaderExiting(true);
     loaderTimerRef.current = setTimeout(() => {
-      setShowLoader(false);
-      setIsLoaderExiting(false);
-      loaderTimerRef.current = null;
-    }, 200);
+      setIsLoaderExiting(true);
+      loaderTimerRef.current = setTimeout(() => {
+        setShowLoader(false);
+        setIsLoaderExiting(false);
+        loaderTimerRef.current = null;
+      }, 220);
+    }, LOADING_EXIT_DELAY);
     return () => {
       if (loaderTimerRef.current) {
         clearTimeout(loaderTimerRef.current);
@@ -308,6 +336,18 @@ export function ProjectAnalyzerModal({ open, onClose, onComplete }) {
       }
     };
   }, [isSubmitting, showLoader]);
+
+  useEffect(() => {
+    return () => {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+      }
+      if (successCloseRef.current) {
+        clearTimeout(successCloseRef.current);
+        successCloseRef.current = null;
+      }
+    };
+  }, []);
 
   const resetForm = () => {
     setStep(1);
@@ -383,6 +423,7 @@ export function ProjectAnalyzerModal({ open, onClose, onComplete }) {
 
   const handleSubmit = async () => {
     setError("");
+    setIsLoaderSuccess(false);
     if (!isProjectNameValid || !isStep2Valid || !isDurationValid) {
       setError("Please complete the required fields.");
       return;
@@ -424,12 +465,31 @@ export function ProjectAnalyzerModal({ open, onClose, onComplete }) {
         method: "POST",
         body: formData,
       });
+      const analysis = data?.analysis || {};
+      const tasks = Array.isArray(analysis?.tasks) ? analysis.tasks : [];
+      if (!tasks.length) {
+        const rationale =
+          typeof analysis?.rationale === "string" ? analysis.rationale : "";
+        setError(
+          rationale?.trim()
+            ? rationale
+            : "Analysis failed. Please try again."
+        );
+        return;
+      }
+      setIsLoaderSuccess(true);
       onComplete?.({
         ...data,
         description: resolvedDescription,
       });
-      resetForm();
-      onClose?.();
+      if (successCloseRef.current) {
+        clearTimeout(successCloseRef.current);
+      }
+      successCloseRef.current = setTimeout(() => {
+        resetForm();
+        onClose?.();
+        successCloseRef.current = null;
+      }, LOADING_EXIT_DELAY);
     } catch (err) {
       setError(err?.message || "Analysis failed. Please try again.");
     } finally {
@@ -521,7 +581,9 @@ export function ProjectAnalyzerModal({ open, onClose, onComplete }) {
       onClick={handleClose}
     >
       <div
-        className={`ws-modal ws-modal-form${isClosing ? " is-closing" : " is-open"}`}
+        className={`ws-modal ws-modal-form ws-modal-video${
+          isClosing ? " is-closing" : " is-open"
+        }`}
         ref={modalRef}
         role="dialog"
         aria-modal="true"
@@ -530,6 +592,11 @@ export function ProjectAnalyzerModal({ open, onClose, onComplete }) {
         onClick={(event) => event.stopPropagation()}
         onKeyDown={handleModalKeyDown}
       >
+        <div className="ws-modal-media" aria-hidden="true">
+          <video autoPlay muted loop playsInline preload="metadata">
+            <source src="/Dashboard%20back.mp4" type="video/mp4" />
+          </video>
+        </div>
         <div className="ws-modal-header">
           <div>
             <p className="ws-kicker">AI Project Analyzer</p>
@@ -708,12 +775,54 @@ export function ProjectAnalyzerModal({ open, onClose, onComplete }) {
         </div>
       </div>
       {showLoader && (
-        <AiLoader
-          label="Generating tasks"
-          size="lg"
-          state={isLoaderExiting ? "success" : "loading"}
-          className={`ai-loader-overlay ${isLoaderExiting ? "is-exiting" : "is-entering"}`}
-        />
+        <div
+          className={`ws-loading-overlay ${
+            isLoaderExiting ? "is-exiting" : "is-entering"
+          }`}
+        >
+          <div
+            className="ws-loading-card ws-loading-card--overlay"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="ws-loading-head">
+              <span
+                className={`ws-loading-icon ${
+                  isLoaderSuccess ? "is-success" : "is-loading"
+                }`}
+                aria-hidden="true"
+              >
+                {isLoaderSuccess ? (
+                  <CheckCircle size={16} />
+                ) : (
+                  <Loader2 size={16} />
+                )}
+              </span>
+              <div className="ws-loading-head-text">
+                <span className="ws-loading-title">Analyzing project</span>
+                <span
+                  className={`ws-loading-status${
+                    isLoaderSuccess ? " is-success" : ""
+                  }`}
+                >
+                  {isLoaderSuccess ? "True" : "Working..."}
+                </span>
+              </div>
+              <span className="ws-loading-percent">{loadingProgress}%</span>
+            </div>
+            <div className="ws-loading-bar" aria-hidden="true">
+              <span
+                className={`ws-loading-bar-fill${
+                  isLoaderSuccess ? " is-success" : ""
+                }`}
+                style={{ width: `${loadingProgress}%` }}
+              />
+            </div>
+            <p className="ws-loading-subtitle">
+              Generating tasks and dependencies...
+            </p>
+          </div>
+        </div>
       )}
     </div>
   );

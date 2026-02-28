@@ -66,9 +66,21 @@ const WORKFLOW_STEPS = [
 export default function HomePage() {
   return (
     <div className="home-shell">
+      <div className="home-video" aria-hidden="true">
+        <video
+          className="home-video-media"
+          autoPlay
+          muted
+          loop
+          playsInline
+          preload="metadata"
+          src="/starts%20video%20background.mp4"
+        />
+        <div className="home-video-overlay" />
+      </div>
       <TopNav />
 
-      <main>
+      <main className="home-content">
         <section id="home" className="section hero-area">
           <Hero />
         </section>

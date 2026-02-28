@@ -72,11 +72,14 @@ const sanitizeTasksForSave = (tasks) =>
 
 function useLockBodyScroll(isOpen) {
   useEffect(() => {
-    if (!isOpen) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    if (!isOpen || typeof document === "undefined") return;
+    const { body } = document;
+    const previous = body.style.overflow;
+    body.classList.add("app-modal-open");
+    body.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = previous;
+      body.classList.remove("app-modal-open");
+      body.style.overflow = previous;
     };
   }, [isOpen]);
 }

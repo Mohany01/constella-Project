@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, FileUp, Plus, Users } from "lucide-react";
+import dynamic from "next/dynamic";
 import {
   ProjectAnalysisModal,
   ProjectAnalyzerModal,
 } from "./ProjectAnalyzerModal";
-import TeamBuilderModal from "./TeamBuilderModal";
+
+const TeamBuilderModal = dynamic(() => import("./TeamBuilderModal"), {
+  ssr: false,
+});
 import { apiClient } from "../../lib/apiClient";
 import { computeSchedule } from "../../lib/planning";
 
@@ -73,11 +77,27 @@ const mapDbTaskToAnalysis = (task) => {
   };
 };
 
+const hasBuiltTeam = (teamPayload) => {
+  if (!teamPayload) return false;
+  if (Array.isArray(teamPayload?.team) && teamPayload.team.length > 0) {
+    return true;
+  }
+  return false;
+};
+
 const mapDbProjectToCard = (project) => {
   const deadline = project?.deadline || project?.end_date;
   const analysisTasks = Array.isArray(project?.tasks)
     ? project.tasks.map(mapDbTaskToAnalysis)
     : [];
+  const derivedHasTasks =
+    typeof project?.has_tasks === "boolean"
+      ? project.has_tasks
+      : analysisTasks.length > 0;
+  const derivedHasTeam =
+    typeof project?.has_team === "boolean"
+      ? project.has_team
+      : hasBuiltTeam(project?.team);
   return {
     id: project.project_id,
     dbId: project.project_id,
@@ -90,6 +110,9 @@ const mapDbProjectToCard = (project) => {
     startDate: project.start_date,
     endDate: project.end_date,
     deadline: project.deadline,
+    hasTasks: derivedHasTasks,
+    hasTeam: derivedHasTeam,
+    team: project?.team || null,
     analysis: {
       project_name: project.name,
       analysis: {
@@ -102,6 +125,8 @@ const mapDbProjectToCard = (project) => {
 
 export default function ProjectsMain() {
   const [projects, setProjects] = useState(INITIAL_PROJECTS);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState(0);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState(null);
   const [isPlannerOpen, setIsPlannerOpen] = useState(false);
@@ -110,9 +135,38 @@ export default function ProjectsMain() {
   const [actionError, setActionError] = useState("");
 
   const progressDots = useMemo(() => Array.from({ length: 10 }), []);
+  const loadingIntervalRef = useRef(null);
+  const loadingTimeoutRef = useRef(null);
+
+  const applyProjectDetails = (projectId, details) => {
+    if (!details) return;
+    setProjects((prev) =>
+      prev.map((project) =>
+        project.id === projectId
+          ? { ...mapDbProjectToCard(details), id: project.id }
+          : project
+      )
+    );
+  };
 
   useEffect(() => {
     let isMounted = true;
+    setIsLoading(true);
+    setLoadingProgress(0);
+    if (loadingIntervalRef.current) {
+      clearInterval(loadingIntervalRef.current);
+    }
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+    }
+    loadingIntervalRef.current = setInterval(() => {
+      setLoadingProgress((prev) => {
+        if (prev >= 90) return prev;
+        const bump = Math.floor(6 + Math.random() * 10);
+        return Math.min(90, prev + bump);
+      });
+    }, 280);
+
     const loadProjects = async () => {
       try {
         const data = await apiClient("/projects", { method: "GET" });
@@ -122,11 +176,32 @@ export default function ProjectsMain() {
       } catch (err) {
         if (!isMounted) return;
         setActionError(err?.message || "Unable to load projects.");
+      } finally {
+        if (!isMounted) return;
+        if (loadingIntervalRef.current) {
+          clearInterval(loadingIntervalRef.current);
+          loadingIntervalRef.current = null;
+        }
+        setLoadingProgress(100);
+        loadingTimeoutRef.current = setTimeout(() => {
+          if (isMounted) {
+            setIsLoading(false);
+          }
+        }, 200);
       }
     };
+
     loadProjects();
     return () => {
       isMounted = false;
+      if (loadingIntervalRef.current) {
+        clearInterval(loadingIntervalRef.current);
+        loadingIntervalRef.current = null;
+      }
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+        loadingTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -160,14 +235,59 @@ export default function ProjectsMain() {
     (project) => project.id === activeTeamProjectId
   );
 
+  const refreshProjectById = async (projectId) => {
+    const target = projects.find((project) => project.id === projectId);
+    if (!target?.dbId) return;
+    try {
+      const data = await apiClient(`/projects/${target.dbId}`, {
+        method: "GET",
+      });
+      if (!data?.project_id) return;
+      applyProjectDetails(projectId, data);
+    } catch (err) {
+      setActionError(err?.message || "Unable to load project details.");
+    }
+  };
+
+  const refreshProjectTeam = async (projectId) => {
+    const target = projects.find((project) => project.id === projectId);
+    if (!target?.dbId) return;
+    try {
+      const data = await apiClient(`/projects/${target.dbId}/team`, {
+        method: "GET",
+      });
+      const nextTeam = {
+        team: data?.team || [],
+        unassigned_tasks: data?.unassigned_tasks || [],
+        num_employees: data?.num_employees ?? null,
+        rationale: data?.rationale,
+      };
+      setProjects((prev) =>
+        prev.map((project) =>
+          project.id === projectId
+            ? {
+                ...project,
+                team: nextTeam,
+                hasTeam: hasBuiltTeam(nextTeam),
+              }
+            : project
+        )
+      );
+    } catch (err) {
+      setActionError(err?.message || "Unable to load team details.");
+    }
+  };
+
   const handleOpenPlanner = (projectId) => {
     setActiveProjectId(projectId);
     setIsPlannerOpen(true);
+    refreshProjectById(projectId);
   };
 
   const handleOpenTeamBuilder = (projectId) => {
     setActiveTeamProjectId(projectId);
     setIsTeamOpen(true);
+    refreshProjectTeam(projectId);
   };
 
   const handleSaveTeam = async (updatedTeam) => {
@@ -202,7 +322,6 @@ export default function ProjectsMain() {
     } catch (err) {
       const message = err?.message || "Unable to save team.";
       setActionError(message);
-      throw err;
     }
   };
 
@@ -244,7 +363,6 @@ export default function ProjectsMain() {
     } catch (err) {
       const message = err?.message || "Unable to save project.";
       setActionError(message);
-      throw err;
     }
   };
 
@@ -323,16 +441,39 @@ export default function ProjectsMain() {
           {actionError && <p className="ws-error">{actionError}</p>}
 
           <div className="ws-card-grid">
-            {projects.length === 0 ? (
+            {isLoading ? (
+              <div className="ws-loading">
+                <div className="ws-loading-card" role="status" aria-live="polite">
+                  <div className="ws-loading-head">
+                    <span className="ws-loading-title">Loading projects</span>
+                    <span className="ws-loading-percent">{loadingProgress}%</span>
+                  </div>
+                  <div className="ws-loading-bar" aria-hidden="true">
+                    <span
+                      className="ws-loading-bar-fill"
+                      style={{ width: `${loadingProgress}%` }}
+                    />
+                  </div>
+                  <p className="ws-loading-subtitle">
+                    Loading your latest project portfolio. Please wait…
+                  </p>
+                </div>
+              </div>
+            ) : projects.length === 0 ? (
               <div className="ws-empty">No projects yet. Create one to get started.</div>
             ) : (
               projects.map((project) => {
-                const canBuildTeam = Boolean(
-                  project?.analysis?.analysis?.tasks?.length
-                );
-                const hasTeam = Boolean(
-                  project?.team?.team?.length || project?.team?.unassigned_tasks?.length
-                );
+                const canBuildTeam =
+                  typeof project?.hasTasks === "boolean"
+                    ? project.hasTasks
+                    : Boolean(project?.analysis?.analysis?.tasks?.length);
+                const hasTeam =
+                  typeof project?.hasTeam === "boolean"
+                    ? project.hasTeam
+                    : Boolean(
+                        project?.team?.team?.length ||
+                          project?.team?.unassigned_tasks?.length
+                      );
                 return (
                 <article
                   key={project.id}

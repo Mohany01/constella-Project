@@ -1,4 +1,5 @@
 import "../styles/globals.css";
+import "../styles/teamBuilderV2.css";
 import { Inter, Manrope } from "next/font/google";
 
 const bodyFont = Inter({
@@ -6,7 +7,7 @@ const bodyFont = Inter({
   weight: ["400", "600"],
   variable: "--font-body",
   display: "swap",
-});
+}); 
 
 const headingFont = Manrope({
   subsets: ["latin"],
@@ -31,3 +32,4 @@ export default function RootLayout({ children }) {
     </html>
   );
 }
+
