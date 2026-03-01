@@ -1,3 +1,5 @@
+import { safeLocalStorageSet } from "./storage";
+
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 let refreshPromise = null;
@@ -24,7 +26,12 @@ const logDebugId = (data, status) => {
   if (!debugId) return;
   if (typeof window === "undefined") return;
   if (process.env.NODE_ENV === "production") return;
-  console.error(`[api] ${status} debugId=${debugId}`);
+  const logLine = `[api] ${status} debugId=${debugId}`;
+  if (status >= 500) {
+    console.error(logLine);
+    return;
+  }
+  console.warn(logLine);
 };
 
 const buildRequestOptions = (options = {}) => {
@@ -45,6 +52,30 @@ const buildRequestOptions = (options = {}) => {
   };
 };
 
+const getApiErrorMessage = (data, status) => {
+  const nestedMessage =
+    (typeof data?.error?.message === "string" && data.error.message.trim()) ||
+    "";
+  const detailMessage =
+    (typeof data?.detail === "string" && data.detail.trim()) || "";
+
+  if (status === 400) {
+    const raw = nestedMessage || detailMessage || "";
+    if (raw.toLowerCase().includes("already exists")) {
+      return "Email already exists.";
+    }
+    return "Something went wrong.";
+  }
+
+  if (nestedMessage) {
+    return nestedMessage;
+  }
+  if (detailMessage) {
+    return detailMessage;
+  }
+  return getFriendlyMessage(status);
+};
+
 const refreshAccessToken = async () => {
   if (!refreshPromise) {
     refreshPromise = fetch(`${BASE_URL}/auth/refresh`, {
@@ -57,7 +88,7 @@ const refreshAccessToken = async () => {
           throw new Error("Refresh failed");
         }
         if (typeof window !== "undefined") {
-          localStorage.setItem("token", payload.access_token);
+          safeLocalStorageSet("token", payload.access_token);
         }
         return payload.access_token;
       })
@@ -70,6 +101,7 @@ const refreshAccessToken = async () => {
 
 export async function apiClient(url, options = {}) {
   const requestOptions = buildRequestOptions(options);
+  const isLoginRequest = url === "/auth/login";
   let res;
   try {
     res = await fetch(`${BASE_URL}${url}`, requestOptions);
@@ -83,6 +115,11 @@ export async function apiClient(url, options = {}) {
   } catch {}
 
   if (res.status === 401) {
+    if (isLoginRequest) {
+      logDebugId(data, res.status);
+      throw new Error(getApiErrorMessage(data, res.status));
+    }
+
     if (!options._retry) {
       try {
         await refreshAccessToken();
@@ -106,7 +143,7 @@ export async function apiClient(url, options = {}) {
 
   if (!res.ok) {
     logDebugId(data, res.status);
-    throw new Error(getFriendlyMessage(res.status));
+    throw new Error(getApiErrorMessage(data, res.status));
   }
 
   return data;

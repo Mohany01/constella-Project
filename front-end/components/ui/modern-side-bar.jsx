@@ -89,6 +89,18 @@ export function Sidebar({ className = "", children }) {
     }
   };
 
+  const handleLogout = () => {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem("token");
+        window.localStorage.removeItem("user");
+      } catch {}
+      // Ensure refresh cookie is cleared client-side as best effort.
+      document.cookie = "refresh_token=; Max-Age=0; path=/; SameSite=Lax";
+      window.location.href = "/login";
+    }
+  };
+
   const sidebarClassName = useMemo(() => {
     return [
       "modern-sidebar",
@@ -228,7 +240,7 @@ export function Sidebar({ className = "", children }) {
 
           <button
             type="button"
-            onClick={() => handleItemClick("logout")}
+            onClick={handleLogout}
             className={`sidebar-logout ${isCollapsed ? "is-collapsed" : ""}`}
             title={isCollapsed ? "Logout" : undefined}
           >
