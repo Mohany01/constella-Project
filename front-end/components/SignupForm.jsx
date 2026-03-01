@@ -1,14 +1,12 @@
 ﻿"use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { apiClient } from "../lib/apiClient";
-
-const socialButtons = [
-  { id: "google", label: "Continue with Google", icon: "G" },
-  { id: "github", label: "Continue with GitHub", icon: "GH" },
-];
+import { safeLocalStorageSet } from "../lib/storage";
 
 export default function SignupForm({ className = "", step: externalStep, setStep: externalSetStep }) {
+  const router = useRouter();
   const [stepInternal, setStepInternal] = useState(1);
   const step = externalStep ?? stepInternal;
   const setStep = externalSetStep ?? setStepInternal;
@@ -22,9 +20,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
   const [showPassword, setShowPassword] = useState(false);
 
   // Step 2
-  const [role, setRole] = useState("company");
-  const [totalHours, setTotalHours] = useState("");
-  const [availableHours, setAvailableHours] = useState("");
+  const [role, setRole] = useState("project_manager");
   const [skills, setSkills] = useState([]);
   const [manualGroups, setManualGroups] = useState({
     core_hard_skills: [],
@@ -43,20 +39,46 @@ export default function SignupForm({ className = "", step: externalStep, setStep
   const [toolsSkillInput, setToolsSkillInput] = useState("");
   const [languageSkillInput, setLanguageSkillInput] = useState("");
   const [cvFile, setCvFile] = useState(null);
-  const [company, setCompany] = useState("");
-  const [companyError, setCompanyError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [cvLoading, setCvLoading] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
-  const miniStepsTotal = role === "employee" ? 2 : 0;
+  const [skillsSaved, setSkillsSaved] = useState(false);
+  const [suggestionsByCategory, setSuggestionsByCategory] = useState({
+    core_hard_skills: [],
+    core_tools_and_tech: [],
+    core_soft_skills: [],
+    core_languages: [],
+  });
+  const [suggestLoadingByCategory, setSuggestLoadingByCategory] = useState({
+    core_hard_skills: false,
+    core_tools_and_tech: false,
+    core_soft_skills: false,
+    core_languages: false,
+  });
+  const suggestionTimersRef = useRef({});
+  const categoryToApi = useMemo(
+    () => ({
+      core_hard_skills: "hard_skill",
+      core_soft_skills: "soft_skill",
+      core_tools_and_tech: "tool_tech",
+      core_languages: "language",
+    }),
+    []
+  );
+  const miniStepsTotal = role === "employee" ? 1 : 0;
 
   // Errors and messages
   const [emailError, setEmailError] = useState("");
   const [passwordError, setPasswordError] = useState("");
-  const [hoursError, setHoursError] = useState("");
   const [message, setMessage] = useState(null);
   const [isError, setIsError] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [verificationId, setVerificationId] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationLoading, setVerificationLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendCooldownSec, setResendCooldownSec] = useState(0);
 
   const stepLabels = useMemo(
     () => [
@@ -99,27 +121,11 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     }
   }
 
-  function validateHours(total, available) {
-    if (role !== "employee") {
-      setHoursError("");
-      return true;
-    }
-    if (!total || !available) {
-      setHoursError("Please enter your weekly hours and availability.");
-      return false;
-    }
-    if (Number(available) > Number(total)) {
-      setHoursError("Available hours cannot exceed total hours per week.");
-      return false;
-    }
-    setHoursError("");
-    return true;
-  }
-
   // Skills helpers
   function addManualSkill(category, value) {
     const trimmed = (value || "").trim();
     if (!trimmed) return;
+    setSkillsSaved(false);
     setManualGroups((prev) => ({
       ...prev,
       [category]: Array.from(new Set([...(prev[category] || []), trimmed])),
@@ -127,7 +133,55 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     setSkills((prev) => Array.from(new Set([...prev, trimmed])));
   }
 
+  function clearSuggestions(category) {
+    setSuggestionsByCategory((prev) => ({ ...prev, [category]: [] }));
+    setSuggestLoadingByCategory((prev) => ({ ...prev, [category]: false }));
+  }
+
+  function queueSuggestions(category, value) {
+    const query = (value || "").trim();
+    const backendCategory = categoryToApi[category];
+    const timerId = suggestionTimersRef.current[category];
+    if (timerId) clearTimeout(timerId);
+
+    if (!query || !backendCategory) {
+      clearSuggestions(category);
+      return;
+    }
+
+    setSuggestLoadingByCategory((prev) => ({ ...prev, [category]: true }));
+    suggestionTimersRef.current[category] = setTimeout(async () => {
+      try {
+        const data = await apiClient(
+          `/cv/skill-suggestions?category=${encodeURIComponent(
+            backendCategory
+          )}&q=${encodeURIComponent(query)}&limit=8`
+        );
+        const existing = new Set(
+          [...(extractedGroups[category] || []), ...(manualGroups[category] || [])].map(
+            (item) => item.toLowerCase()
+          )
+        );
+        const next = (Array.isArray(data?.suggestions) ? data.suggestions : []).filter(
+          (name) => !existing.has(String(name).toLowerCase())
+        );
+        setSuggestionsByCategory((prev) => ({ ...prev, [category]: next }));
+      } catch {
+        setSuggestionsByCategory((prev) => ({ ...prev, [category]: [] }));
+      } finally {
+        setSuggestLoadingByCategory((prev) => ({ ...prev, [category]: false }));
+      }
+    }, 180);
+  }
+
+  function chooseSuggestion(category, value, setInput) {
+    addManualSkill(category, value);
+    setInput("");
+    clearSuggestions(category);
+  }
+
   function removeSkill(skill) {
+    setSkillsSaved(false);
     setSkills((prev) => prev.filter((s) => s !== skill));
     setExtractedGroups((prev) => ({
       core_hard_skills: prev.core_hard_skills.filter((s) => s !== skill),
@@ -155,6 +209,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     const file = e.target.files?.[0];
     if (!file) return;
     setCvFile(file);
+    setSkillsSaved(false);
     setCvLoading(true);
     setMessage(null);
     setIsError(false);
@@ -191,6 +246,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     const file = e.dataTransfer.files?.[0];
     if (file && /\.(pdf|docx?|txt)$/i.test(file.name)) {
       setCvFile(file);
+      setSkillsSaved(false);
       setCvLoading(true);
       setMessage(null);
       setIsError(false);
@@ -232,64 +288,78 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     setDragActive(false);
   }
 
-  // Step actions
-  async function goNext() {
-    if (!name.trim()) {
-      setNameError("Full name is required.");
-    } else {
-      setNameError("");
+  function validateStepOneInputs() {
+    const nextNameError = name.trim() ? "" : "Full name is required.";
+    const trimmedEmail = email.trim();
+    let nextEmailError = "";
+    if (!trimmedEmail) {
+      nextEmailError = "Email is required.";
+    } else if (!trimmedEmail.includes("@")) {
+      nextEmailError = "Email must include an '@' symbol.";
+    } else if (!/\.[a-zA-Z]{2,}$/.test(trimmedEmail)) {
+      nextEmailError = "Email must include a valid domain (e.g. .com).";
     }
-    handleEmailChange(email);
-    handlePasswordChange(password);
-    if (!name.trim() || emailError || passwordError) {
+    let nextPasswordError = "";
+    if (!password) {
+      nextPasswordError = "Password is required.";
+    } else if (password.length < 6) {
+      nextPasswordError = "Must be at least 6 characters.";
+    }
+
+    setNameError(nextNameError);
+    setEmailError(nextEmailError);
+    setPasswordError(nextPasswordError);
+
+    if (nextNameError || nextEmailError || nextPasswordError) {
       setIsError(true);
       setMessage("Please fix the errors above.");
-      return;
+      return false;
     }
+    return true;
+  }
+
+  function extractCooldownSeconds(message) {
+    const text = String(message || "");
+    const matched = text.match(/(\d+)\s*seconds?/i);
+    if (!matched) return 0;
+    return Number(matched[1]) || 0;
+  }
+
+  useEffect(() => {
+    if (resendCooldownSec <= 0) return undefined;
+    const timer = setInterval(() => {
+      setResendCooldownSec((prev) => (prev > 1 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldownSec]);
+
+  useEffect(
+    () => () => {
+      Object.values(suggestionTimersRef.current || {}).forEach((timerId) => {
+        if (timerId) clearTimeout(timerId);
+      });
+    },
+    []
+  );
+
+  function completeAuthSuccess(data) {
+    if (typeof window !== "undefined" && data?.token) {
+      safeLocalStorageSet("token", data.token);
+      safeLocalStorageSet(
+        "user",
+        JSON.stringify({ id: data.id, name: data.name, email: data.email })
+      );
+    }
+    setVerificationCode("");
+    setShowVerificationModal(false);
+    setMessage("Account verified successfully.");
     setIsError(false);
-    setMessage(null);
-    const created = await handleSubmit();
-    if (created) {
-      setStep(2); // optional profile step after account is created
-    }
+    setStep(2);
   }
 
-  function goBack() {
-    if (step === 2 && role === "employee" && subStep > 1) {
-      setSubStep((s) => Math.max(1, s - 1));
-      return;
-    }
-    setSubStep(1);
-    setStep(1);
-  }
-
-  function handleSkip() {
-    if (step === 2 && role === "employee" && subStep === 1) {
-      setSubStep(2);
-      return;
-    }
-    handleSubmit();
-  }
-
-  // Submit
-  async function handleSubmit(e) {
-    e?.preventDefault();
-    const nameOk = !!name.trim();
-    if (!nameOk) {
-      setNameError("Full name is required.");
-    }
-    handleEmailChange(email);
-    handlePasswordChange(password);
-    const emailOk =
-      !!email &&
-      email.includes("@") &&
-      email.includes(".");
-    const passwordOk = !!password && password.length >= 6;
-    const stepOneOk = nameOk && emailOk && passwordOk && !emailError && !passwordError;
-    if (!stepOneOk) {
-      setIsError(true);
-      setMessage("Please fix the errors above.");
-      return;
+  async function startSignupVerification() {
+    if (!validateStepOneInputs()) {
+      return false;
     }
 
     setLoading(true);
@@ -297,7 +367,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     setIsError(false);
 
     try {
-      const data = await apiClient("/auth/signup", {
+      const data = await apiClient("/auth/signup/start", {
         method: "POST",
         body: JSON.stringify({
           name: name.trim(),
@@ -305,40 +375,11 @@ export default function SignupForm({ className = "", step: externalStep, setStep
           password,
         }),
       });
-      if (typeof window !== "undefined" && data?.token) {
-        localStorage.setItem("token", data.token);
-        localStorage.setItem(
-          "user",
-          JSON.stringify({ id: data.id, name: data.name, email: data.email })
-        );
-      }
-      setMessage("Account created successfully.");
-      setName("");
-      setEmail("");
-      setPassword("");
-      setTotalHours("");
-      setAvailableHours("");
-      setSkills([]);
-      setManualGroups({
-        core_hard_skills: [],
-        core_tools_and_tech: [],
-        core_soft_skills: [],
-        core_languages: [],
-      });
-      setHardSkillInput("");
-      setSoftSkillInput("");
-      setToolsSkillInput("");
-      setLanguageSkillInput("");
-      setExtractedGroups({
-        core_hard_skills: [],
-        core_tools_and_tech: [],
-        core_soft_skills: [],
-        core_languages: [],
-      });
-      setCvFile(null);
-      setCompany("");
-      setCompanyError("");
-      setStep(1);
+      setVerificationId(data?.verification_id || "");
+      setVerificationCode("");
+      setShowVerificationModal(true);
+      setResendCooldownSec(Math.max(0, Number(data?.resend_cooldown_seconds || 0)));
+      setMessage(data?.message || "Verification code sent to your email.");
       return true;
     } catch (error) {
       setIsError(true);
@@ -347,6 +388,108 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleVerifyCode() {
+    if (!verificationCode.trim()) {
+      setIsError(true);
+      setMessage("Enter the verification code.");
+      return;
+    }
+    if (!verificationId) {
+      setIsError(true);
+      setMessage("Verification session missing. Please request a new code.");
+      return;
+    }
+
+    setVerificationLoading(true);
+    setMessage(null);
+    setIsError(false);
+
+    try {
+      const data = await apiClient("/auth/signup/verify", {
+        method: "POST",
+        body: JSON.stringify({
+          verification_id: verificationId,
+          code: verificationCode.trim(),
+        }),
+      });
+      completeAuthSuccess(data);
+    } catch (error) {
+      setIsError(true);
+      setMessage(error.message || "Verification failed.");
+    } finally {
+      setVerificationLoading(false);
+    }
+  }
+
+  async function handleResendCode() {
+    if (!validateStepOneInputs()) {
+      return;
+    }
+
+    setResendLoading(true);
+    setMessage(null);
+    setIsError(false);
+
+    try {
+      const data = await apiClient("/auth/signup/start", {
+        method: "POST",
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          password,
+        }),
+      });
+      setVerificationId(data?.verification_id || "");
+      setVerificationCode("");
+      setShowVerificationModal(true);
+      setResendCooldownSec(Math.max(0, Number(data?.resend_cooldown_seconds || 0)));
+      setMessage(data?.message || "Verification code resent.");
+    } catch (error) {
+      setIsError(true);
+      setMessage(error.message || "Failed to resend code.");
+      const waitSec = extractCooldownSeconds(error.message);
+      if (waitSec > 0) {
+        setResendCooldownSec(waitSec);
+      }
+    } finally {
+      setResendLoading(false);
+    }
+  }
+
+  // Step actions
+  async function goNext() {
+    await startSignupVerification();
+  }
+
+  function goBack() {
+    setSubStep(1);
+    setStep(1);
+  }
+
+  // Submit
+  async function handleSubmit(e) {
+    e?.preventDefault();
+    if (step === 1) {
+      await startSignupVerification();
+      return;
+    }
+    if (role === "employee") {
+      if (!cvFile) {
+        setIsError(true);
+        setMessage("Please upload your CV before finishing.");
+        return;
+      }
+      if (!skillsSaved) {
+        setIsError(true);
+        setMessage("Please save your skills before finishing.");
+        return;
+      }
+    }
+    setMessage("Profile setup completed.");
+    setIsError(false);
+    router.push("/dashboard");
   }
 
   async function handleSaveSkills() {
@@ -359,11 +502,42 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     setMessage(null);
     setIsError(false);
     try {
+      const skillsByCategory = {
+        core_hard_skills: Array.from(
+          new Set([
+            ...extractedGroups.core_hard_skills,
+            ...manualGroups.core_hard_skills,
+          ])
+        ),
+        core_soft_skills: Array.from(
+          new Set([
+            ...extractedGroups.core_soft_skills,
+            ...manualGroups.core_soft_skills,
+          ])
+        ),
+        core_tools_and_tech: Array.from(
+          new Set([
+            ...extractedGroups.core_tools_and_tech,
+            ...manualGroups.core_tools_and_tech,
+          ])
+        ),
+        core_languages: Array.from(
+          new Set([
+            ...extractedGroups.core_languages,
+            ...manualGroups.core_languages,
+          ])
+        ),
+      };
+
       const data = await apiClient("/cv/save-skills", {
         method: "POST",
-        body: JSON.stringify({ skills }),
+        body: JSON.stringify({
+          skills,
+          skills_by_category: skillsByCategory,
+        }),
       });
       setMessage(`Saved ${data?.saved_skills ?? 0} skills.`);
+      setSkillsSaved(true);
     } catch (error) {
       setIsError(true);
       setMessage(error.message || "Failed to save skills.");
@@ -463,8 +637,8 @@ export default function SignupForm({ className = "", step: externalStep, setStep
             )}
           </div>
 
-          <button className="btn-primary" type="button" onClick={goNext}>
-            Create account
+          <button className="btn-primary" type="button" onClick={goNext} disabled={loading}>
+            {loading ? "Sending code..." : "Create account"}
           </button>
         </div>
       )}
@@ -485,7 +659,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
               <div className="field">
                 <label>Account Type</label>
                 <div className="segment">
-                  {["company", "employee"].map((option) => (
+                  {["project_manager", "employee"].map((option) => (
                     <button
                   key={option}
                   type="button"
@@ -493,13 +667,13 @@ export default function SignupForm({ className = "", step: externalStep, setStep
                   onClick={() => setRole(option)}
                   aria-pressed={role === option}
                 >
-                  {option === "company" ? "Company" : "Employee"}
+                  {option === "project_manager" ? "Project Manager" : "Employee"}
                 </button>
               ))}
             </div>
           </div>
 
-          {role === "employee" && subStep === 1 && (
+          {role === "employee" && (
             <>
               <div
                 className={`upload-card ${dragActive ? "dragging" : ""}`}
@@ -529,7 +703,10 @@ export default function SignupForm({ className = "", step: externalStep, setStep
                       <button
                         type="button"
                         className="upload-remove"
-                        onClick={() => setCvFile(null)}
+                        onClick={() => {
+                          setCvFile(null);
+                          setSkillsSaved(false);
+                        }}
                         aria-label="Remove file"
                       >
                         ×
@@ -585,12 +762,17 @@ export default function SignupForm({ className = "", step: externalStep, setStep
                         className="input modern input-compact"
                         placeholder="Add hard skill"
                         value={hardSkillInput}
-                        onChange={(e) => setHardSkillInput(e.target.value)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setHardSkillInput(value);
+                          queueSuggestions("core_hard_skills", value);
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
                             addManualSkill("core_hard_skills", hardSkillInput);
                             setHardSkillInput("");
+                            clearSuggestions("core_hard_skills");
                           }
                         }}
                       />
@@ -600,12 +782,30 @@ export default function SignupForm({ className = "", step: externalStep, setStep
                         onClick={() => {
                           addManualSkill("core_hard_skills", hardSkillInput);
                           setHardSkillInput("");
+                          clearSuggestions("core_hard_skills");
                         }}
                         aria-label="Add hard skill"
                       >
                         +
                       </button>
                     </div>
+                    {suggestLoadingByCategory.core_hard_skills && hardSkillInput.trim() && (
+                      <p className="field-hint">Loading suggestions...</p>
+                    )}
+                    {suggestionsByCategory.core_hard_skills.length > 0 && hardSkillInput.trim() && (
+                      <div className="skill-suggest-list" role="listbox" aria-label="Hard skill suggestions">
+                        {suggestionsByCategory.core_hard_skills.map((name) => (
+                          <button
+                            key={`hard-${name}`}
+                            type="button"
+                            className="skill-suggest-item"
+                            onClick={() => chooseSuggestion("core_hard_skills", name, setHardSkillInput)}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -642,12 +842,17 @@ export default function SignupForm({ className = "", step: externalStep, setStep
                         className="input modern input-compact"
                         placeholder="Add soft skill"
                         value={softSkillInput}
-                        onChange={(e) => setSoftSkillInput(e.target.value)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setSoftSkillInput(value);
+                          queueSuggestions("core_soft_skills", value);
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
                             addManualSkill("core_soft_skills", softSkillInput);
                             setSoftSkillInput("");
+                            clearSuggestions("core_soft_skills");
                           }
                         }}
                       />
@@ -657,12 +862,30 @@ export default function SignupForm({ className = "", step: externalStep, setStep
                         onClick={() => {
                           addManualSkill("core_soft_skills", softSkillInput);
                           setSoftSkillInput("");
+                          clearSuggestions("core_soft_skills");
                         }}
                         aria-label="Add soft skill"
                       >
                         +
                       </button>
                     </div>
+                    {suggestLoadingByCategory.core_soft_skills && softSkillInput.trim() && (
+                      <p className="field-hint">Loading suggestions...</p>
+                    )}
+                    {suggestionsByCategory.core_soft_skills.length > 0 && softSkillInput.trim() && (
+                      <div className="skill-suggest-list" role="listbox" aria-label="Soft skill suggestions">
+                        {suggestionsByCategory.core_soft_skills.map((name) => (
+                          <button
+                            key={`soft-${name}`}
+                            type="button"
+                            className="skill-suggest-item"
+                            onClick={() => chooseSuggestion("core_soft_skills", name, setSoftSkillInput)}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -699,12 +922,17 @@ export default function SignupForm({ className = "", step: externalStep, setStep
                         className="input modern input-compact"
                         placeholder="Add tool or tech"
                         value={toolsSkillInput}
-                        onChange={(e) => setToolsSkillInput(e.target.value)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setToolsSkillInput(value);
+                          queueSuggestions("core_tools_and_tech", value);
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
                             addManualSkill("core_tools_and_tech", toolsSkillInput);
                             setToolsSkillInput("");
+                            clearSuggestions("core_tools_and_tech");
                           }
                         }}
                       />
@@ -714,12 +942,30 @@ export default function SignupForm({ className = "", step: externalStep, setStep
                         onClick={() => {
                           addManualSkill("core_tools_and_tech", toolsSkillInput);
                           setToolsSkillInput("");
+                          clearSuggestions("core_tools_and_tech");
                         }}
                         aria-label="Add tool or tech"
                       >
                         +
                       </button>
                     </div>
+                    {suggestLoadingByCategory.core_tools_and_tech && toolsSkillInput.trim() && (
+                      <p className="field-hint">Loading suggestions...</p>
+                    )}
+                    {suggestionsByCategory.core_tools_and_tech.length > 0 && toolsSkillInput.trim() && (
+                      <div className="skill-suggest-list" role="listbox" aria-label="Tools and tech suggestions">
+                        {suggestionsByCategory.core_tools_and_tech.map((name) => (
+                          <button
+                            key={`tools-${name}`}
+                            type="button"
+                            className="skill-suggest-item"
+                            onClick={() => chooseSuggestion("core_tools_and_tech", name, setToolsSkillInput)}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -756,12 +1002,17 @@ export default function SignupForm({ className = "", step: externalStep, setStep
                         className="input modern input-compact"
                         placeholder="Add language"
                         value={languageSkillInput}
-                        onChange={(e) => setLanguageSkillInput(e.target.value)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setLanguageSkillInput(value);
+                          queueSuggestions("core_languages", value);
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
                             addManualSkill("core_languages", languageSkillInput);
                             setLanguageSkillInput("");
+                            clearSuggestions("core_languages");
                           }
                         }}
                       />
@@ -771,12 +1022,30 @@ export default function SignupForm({ className = "", step: externalStep, setStep
                         onClick={() => {
                           addManualSkill("core_languages", languageSkillInput);
                           setLanguageSkillInput("");
+                          clearSuggestions("core_languages");
                         }}
                         aria-label="Add language"
                       >
                         +
                       </button>
                     </div>
+                    {suggestLoadingByCategory.core_languages && languageSkillInput.trim() && (
+                      <p className="field-hint">Loading suggestions...</p>
+                    )}
+                    {suggestionsByCategory.core_languages.length > 0 && languageSkillInput.trim() && (
+                      <div className="skill-suggest-list" role="listbox" aria-label="Language suggestions">
+                        {suggestionsByCategory.core_languages.map((name) => (
+                          <button
+                            key={`lang-${name}`}
+                            type="button"
+                            className="skill-suggest-item"
+                            onClick={() => chooseSuggestion("core_languages", name, setLanguageSkillInput)}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -800,109 +1069,79 @@ export default function SignupForm({ className = "", step: externalStep, setStep
             </>
           )}
 
-          {role === "employee" && subStep === 2 && (
-            <div className="grid-2">
-              <div className="field">
-                <label htmlFor="totalHours">Total hours per week</label>
-                <input
-                  id="totalHours"
-                  className="input modern"
-                  type="number"
-                  min="1"
-                  placeholder="e.g. 40"
-                  value={totalHours}
-                  onChange={(e) => setTotalHours(e.target.value)}
-                  required
-                />
-                <div className="field-feedback-spacer" aria-hidden />
+          {role === "employee" ? (
+            <div className="actions">
+              <div className="actions-left">
+                <button type="button" className="ghost-btn" onClick={goBack}>
+                  Back
+                </button>
               </div>
-              <div className="field">
-                <label htmlFor="availableHours">Available hours</label>
-                <input
-                  id="availableHours"
-                  className={`input modern ${hoursError ? "input-error" : ""}`.trim()}
-                  type="number"
-                  min="0"
-                  placeholder="e.g. 30"
-                  value={availableHours}
-                  onChange={(e) => setAvailableHours(e.target.value)}
-                  aria-invalid={!!hoursError}
-                  required
-                />
-                {hoursError ? (
-                  <p className="field-error" role="alert">
-                    {hoursError}
-                  </p>
-                ) : (
-                  <div className="field-feedback-spacer" aria-hidden />
-                )}
+              <div className="actions-right">
+                <button
+                  className="btn-primary"
+                  type="submit"
+                  disabled={loading || cvLoading || saveLoading}
+                >
+                  {loading ? "Finishing..." : "Finish setup"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="actions" style={{ justifyContent: "center" }}>
+              <div className="actions-right" style={{ width: "auto" }}>
+                <button className="btn-primary" type="submit" disabled={loading}>
+                  {loading ? "Finishing..." : "Finish setup"}
+                </button>
               </div>
             </div>
           )}
-
-          {role === "company" && (
-            <div className="field">
-              <label htmlFor="company">Company</label>
-              <input
-                id="company"
-                className={`input modern ${companyError ? "input-error" : ""}`.trim()}
-                placeholder="company name"
-                value={company}
-                onChange={(e) => {
-                  setCompany(e.target.value);
-                  if (companyError) setCompanyError("");
-                }}
-                required
-              />
-              {companyError ? (
-                <p className="field-error" role="alert">
-                  {companyError}
-                </p>
-              ) : (
-                <div className="field-feedback-spacer" aria-hidden />
-              )}
-            </div>
-          )}
-
-          <div className="actions">
-            <div className="actions-left">
-              <button type="button" className="ghost-btn" onClick={goBack}>
-                Back
-              </button>
-              <button
-                type="button"
-                className="ghost-btn skip-btn"
-                onClick={handleSkip}
-                disabled={loading}
-              >
-                Skip
-              </button>
-            </div>
-            <div className="actions-right">
-              <button
-                className="btn-primary"
-                type={role === "employee" && subStep === 1 ? "button" : "submit"}
-                onClick={
-                  role === "employee" && subStep === 1
-                    ? () => setSubStep(2)
-                    : undefined
-                }
-                disabled={loading}
-              >
-                {role === "employee" && subStep === 1
-                  ? "Continue"
-                  : loading
-                  ? "Finishing..."
-                  : "Finish setup"}
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
       {message && (
         <div className={`${isError ? "error" : "success"} form-message`} role="alert">
           {message}
+        </div>
+      )}
+
+      {showVerificationModal && (
+        <div className="signup-verify-backdrop" role="dialog" aria-modal="true" aria-labelledby="verify-title">
+          <div className="signup-verify-modal">
+            <h3 id="verify-title">Verify your email</h3>
+            <p>
+              Enter the 6-digit code sent to <strong>{email}</strong>.
+            </p>
+            <input
+              type="text"
+              className="input modern signup-verify-input"
+              value={verificationCode}
+              maxLength={6}
+              placeholder="123456"
+              onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ""))}
+            />
+            <div className="signup-verify-actions">
+              <button
+                type="button"
+                className="ghost-btn"
+                onClick={handleResendCode}
+                disabled={resendLoading || verificationLoading || resendCooldownSec > 0}
+              >
+                {resendLoading
+                  ? "Resending..."
+                  : resendCooldownSec > 0
+                  ? `Resend in ${resendCooldownSec}s`
+                  : "Resend code"}
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={handleVerifyCode}
+                disabled={verificationLoading}
+              >
+                {verificationLoading ? "Verifying..." : "Verify code"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </form>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiClient } from "../lib/apiClient";
+import { safeLocalStorageSet } from "../lib/storage";
 
 export default function LoginForm({ className = "" }) {
   const router = useRouter();
@@ -59,8 +60,8 @@ export default function LoginForm({ className = "" }) {
       });
 
       if (typeof window !== "undefined") {
-        localStorage.setItem("token", data.token);
-        localStorage.setItem(
+        safeLocalStorageSet("token", data.token);
+        safeLocalStorageSet(
           "user",
           JSON.stringify({ id: data.id, name: data.name, email: data.email })
         );
@@ -70,7 +71,7 @@ export default function LoginForm({ className = "" }) {
       router.push("/dashboard");
     } catch (error) {
       setIsError(true);
-      setMessage(error.message || "Invalid email or password");
+      setMessage(error.message || "Wrong username or password");
     } finally {
       setLoading(false);
     }
