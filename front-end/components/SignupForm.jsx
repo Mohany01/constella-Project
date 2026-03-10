@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { apiClient } from "../lib/apiClient";
 import { safeLocalStorageSet } from "../lib/storage";
 
+const OTP_LENGTH = 6;
+
 export default function SignupForm({ className = "", step: externalStep, setStep: externalSetStep }) {
   const router = useRouter();
   const [stepInternal, setStepInternal] = useState(1);
@@ -75,10 +77,13 @@ export default function SignupForm({ className = "", step: externalStep, setStep
   const [loading, setLoading] = useState(false);
   const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [verificationId, setVerificationId] = useState("");
-  const [verificationCode, setVerificationCode] = useState("");
+  const [verificationCode, setVerificationCode] = useState(() =>
+    Array(OTP_LENGTH).fill("")
+  );
   const [verificationLoading, setVerificationLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [resendCooldownSec, setResendCooldownSec] = useState(0);
+  const otpInputsRef = useRef([]);
 
   const stepLabels = useMemo(
     () => [
@@ -350,7 +355,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
         JSON.stringify({ id: data.id, name: data.name, email: data.email })
       );
     }
-    setVerificationCode("");
+    setVerificationCode(Array(OTP_LENGTH).fill(""));
     setShowVerificationModal(false);
     setMessage("Account verified successfully.");
     setIsError(false);
@@ -376,7 +381,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
         }),
       });
       setVerificationId(data?.verification_id || "");
-      setVerificationCode("");
+      setVerificationCode(Array(OTP_LENGTH).fill(""));
       setShowVerificationModal(true);
       setResendCooldownSec(Math.max(0, Number(data?.resend_cooldown_seconds || 0)));
       setMessage(data?.message || "Verification code sent to your email.");
@@ -391,9 +396,15 @@ export default function SignupForm({ className = "", step: externalStep, setStep
   }
 
   async function handleVerifyCode() {
-    if (!verificationCode.trim()) {
+    const code = verificationCode.join("").trim();
+    if (!code) {
       setIsError(true);
       setMessage("Enter the verification code.");
+      return;
+    }
+    if (code.length < OTP_LENGTH) {
+      setIsError(true);
+      setMessage("Enter the full 6-digit code.");
       return;
     }
     if (!verificationId) {
@@ -411,7 +422,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
         method: "POST",
         body: JSON.stringify({
           verification_id: verificationId,
-          code: verificationCode.trim(),
+          code,
         }),
       });
       completeAuthSuccess(data);
@@ -442,7 +453,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
         }),
       });
       setVerificationId(data?.verification_id || "");
-      setVerificationCode("");
+      setVerificationCode(Array(OTP_LENGTH).fill(""));
       setShowVerificationModal(true);
       setResendCooldownSec(Math.max(0, Number(data?.resend_cooldown_seconds || 0)));
       setMessage(data?.message || "Verification code resent.");
@@ -466,6 +477,78 @@ export default function SignupForm({ className = "", step: externalStep, setStep
   function goBack() {
     setSubStep(1);
     setStep(1);
+  }
+
+  function focusOtpIndex(index) {
+    const node = otpInputsRef.current[index];
+    if (node) {
+      node.focus();
+      node.select?.();
+    }
+  }
+
+  function applyOtpDigits(startIndex, digits) {
+    setVerificationCode((prev) => {
+      const next = [...prev];
+      digits.forEach((digit, offset) => {
+        const targetIndex = startIndex + offset;
+        if (targetIndex < OTP_LENGTH) {
+          next[targetIndex] = digit;
+        }
+      });
+      return next;
+    });
+  }
+
+  function handleOtpChange(index, value) {
+    const digits = value.replace(/\D/g, "");
+    if (!digits) {
+      setVerificationCode((prev) => {
+        const next = [...prev];
+        next[index] = "";
+        return next;
+      });
+      return;
+    }
+    const digitArray = digits.split("");
+    applyOtpDigits(index, digitArray.slice(0, OTP_LENGTH - index));
+    const nextIndex = Math.min(index + digitArray.length, OTP_LENGTH - 1);
+    focusOtpIndex(nextIndex);
+  }
+
+  function handleOtpKeyDown(index, event) {
+    if (event.key === "Backspace") {
+      if (verificationCode[index]) {
+        setVerificationCode((prev) => {
+          const next = [...prev];
+          next[index] = "";
+          return next;
+        });
+        return;
+      }
+      if (index > 0) {
+        focusOtpIndex(index - 1);
+        setVerificationCode((prev) => {
+          const next = [...prev];
+          next[index - 1] = "";
+          return next;
+        });
+      }
+    } else if (event.key === "ArrowLeft" && index > 0) {
+      focusOtpIndex(index - 1);
+    } else if (event.key === "ArrowRight" && index < OTP_LENGTH - 1) {
+      focusOtpIndex(index + 1);
+    }
+  }
+
+  function handleOtpPaste(event) {
+    const text = event.clipboardData?.getData("text") || "";
+    const digits = text.replace(/\D/g, "").slice(0, OTP_LENGTH);
+    if (!digits) return;
+    event.preventDefault();
+    setVerificationCode(Array(OTP_LENGTH).fill(""));
+    applyOtpDigits(0, digits.split(""));
+    focusOtpIndex(Math.min(digits.length, OTP_LENGTH - 1));
   }
 
   // Submit
@@ -1111,14 +1194,25 @@ export default function SignupForm({ className = "", step: externalStep, setStep
             <p>
               Enter the 6-digit code sent to <strong>{email}</strong>.
             </p>
-            <input
-              type="text"
-              className="input modern signup-verify-input"
-              value={verificationCode}
-              maxLength={6}
-              placeholder="123456"
-              onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ""))}
-            />
+            <div className="signup-verify-otp" onPaste={handleOtpPaste}>
+              {verificationCode.map((digit, index) => (
+                <input
+                  key={`otp-${index}`}
+                  ref={(el) => {
+                    otpInputsRef.current[index] = el;
+                  }}
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete={index === 0 ? "one-time-code" : "off"}
+                  className="signup-verify-otp-input"
+                  maxLength={1}
+                  value={digit}
+                  onChange={(event) => handleOtpChange(index, event.target.value)}
+                  onKeyDown={(event) => handleOtpKeyDown(index, event)}
+                  aria-label={`Verification code digit ${index + 1}`}
+                />
+              ))}
+            </div>
             <div className="signup-verify-actions">
               <button
                 type="button"

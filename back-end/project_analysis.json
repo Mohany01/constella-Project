@@ -13,14 +13,14 @@
       "duration_days": 2
     },
     {
-      "name": "Dataset Description and Objective",
-      "description": "Describe the dataset and objective of the project",
+      "name": "Dataset Description",
+      "description": "Describe dataset and objective of the project",
       "depends_on": [
         "Dataset Search"
       ],
       "skills": [
         "Data Analysis",
-        "Project Planning"
+        "Writing"
       ],
       "start_days_from_kickoff": 2,
       "duration_days": 1
@@ -29,7 +29,7 @@
       "name": "Data Preprocessing",
       "description": "Prepare the dataset using preprocessing techniques if needed",
       "depends_on": [
-        "Dataset Description and Objective"
+        "Dataset Description"
       ],
       "skills": [
         "Python",
@@ -68,7 +68,7 @@
     },
     {
       "name": "Model Regularization and Evaluation",
-      "description": "Regularize both models using regularization techniques and evaluate their performance",
+      "description": "Regularize both models using regularization techniques and evaluate the models",
       "depends_on": [
         "Model Implementation"
       ],
@@ -81,7 +81,7 @@
     },
     {
       "name": "Model Optimization",
-      "description": "Modify the neural network layers to improve efficiency and prevent overfitting/underfitting",
+      "description": "Modify the neural network layers to improve efficiency",
       "depends_on": [
         "Model Regularization and Evaluation"
       ],
@@ -94,16 +94,29 @@
     },
     {
       "name": "Project Presentation Preparation",
-      "description": "Prepare a PPT presentation of the project including introduction, dataset description, models, results, and conclusion",
+      "description": "Prepare a PPT presentation of the project",
       "depends_on": [
         "Model Optimization"
       ],
       "skills": [
-        "Presentation Skills",
-        "PowerPoint"
+        "Presentation",
+        "Writing"
       ],
       "start_days_from_kickoff": 14,
       "duration_days": 2
+    },
+    {
+      "name": "Finalize Project Deliverables",
+      "description": "Finalize dataset file, code files, and PPT presentation",
+      "depends_on": [
+        "Project Presentation Preparation"
+      ],
+      "skills": [
+        "Project Management",
+        "Organization"
+      ],
+      "start_days_from_kickoff": 16,
+      "duration_days": 1
     }
   ],
   "all_skills": [
@@ -117,14 +130,18 @@
     "model selection",
     "neural network optimization",
     "numpy",
+    "organization",
     "pandas",
-    "powerpoint",
-    "presentation skills",
-    "project planning",
+    "planning",
+    "presentation",
+    "project management",
     "python",
     "pytorch",
     "regularization techniques",
-    "tensorflow"
+    "risk management",
+    "stakeholder management",
+    "tensorflow",
+    "writing"
   ],
-  "rationale": "The skills required for this project are a combination of data science, deep learning, and presentation skills. These skills are necessary to complete the tasks outlined in the project, including dataset search, model implementation, and presentation preparation."
+  "rationale": "The skills listed are necessary to complete the project tasks, which involve data search, analysis, preprocessing, model implementation, regularization, evaluation, and optimization, as well as presentation and project management. These skills are required to ensure the successful completion of the graduation project."
 }

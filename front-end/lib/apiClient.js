@@ -61,8 +61,12 @@ const getApiErrorMessage = (data, status) => {
 
   if (status === 400) {
     const raw = nestedMessage || detailMessage || "";
-    if (raw.toLowerCase().includes("already exists")) {
+    const normalized = raw.toLowerCase();
+    if (normalized.includes("already exists")) {
       return "Email already exists.";
+    }
+    if (normalized.includes("not registered")) {
+      return "No account found with this email.";
     }
     return "Something went wrong.";
   }

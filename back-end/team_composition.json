@@ -1,20 +1,74 @@
 {
   "team": [
     {
-      "employee_id": "hjkl,.dfxg",
-      "employee_email": "bayanhaitham871@gmail.com",
-      "employee_filename": "beno",
+      "employee_id": "45678bbb",
+      "employee_email": "muhammedhany510@gmail.com",
+      "employee_filename": "Mohany01",
       "assignments": [
         {
-          "task_name": "Dataset Description and Objective",
-          "start_day": 1,
-          "end_day": 2,
+          "task_name": "Model Regularization and Evaluation",
+          "start_day": 13,
+          "end_day": 15,
           "skills_match": [
-            "data analysis",
-            "project planning"
+            "model evaluation"
+          ],
+          "missing_skills": [
+            "regularization techniques"
+          ],
+          "semantic_match_score": 0.452328622341156
+        },
+        {
+          "task_name": "Model Optimization",
+          "start_day": 15,
+          "end_day": 17,
+          "skills_match": [
+            "neural network optimization"
+          ],
+          "missing_skills": [
+            "hyperparameter tuning"
+          ],
+          "semantic_match_score": 0.4360342025756836
+        }
+      ]
+    },
+    {
+      "employee_id": "uhuh",
+      "employee_email": "bayanistanbli@gmail.com",
+      "employee_filename": "bayan",
+      "assignments": [
+        {
+          "task_name": "Data Preprocessing",
+          "start_day": 5,
+          "end_day": 7,
+          "skills_match": [
+            "python",
+            "numpy",
+            "pandas"
           ],
           "missing_skills": [],
-          "semantic_match_score": 0.8899269104003906
+          "semantic_match_score": 0.6913579106330872
+        },
+        {
+          "task_name": "Dataset Description",
+          "start_day": 7,
+          "end_day": 8,
+          "skills_match": [
+            "python",
+            "data analysis"
+          ],
+          "missing_skills": [],
+          "semantic_match_score": 0.9999998807907104
+        },
+        {
+          "task_name": "Project Presentation Preparation",
+          "start_day": 17,
+          "end_day": 19,
+          "skills_match": [
+            "writing",
+            "presentation"
+          ],
+          "missing_skills": [],
+          "semantic_match_score": 0.6049644947052002
         }
       ]
     },
@@ -26,7 +80,7 @@
         {
           "task_name": "Dataset Search",
           "start_day": 0,
-          "end_day": 1,
+          "end_day": 5,
           "skills_match": [
             "data search"
           ],
@@ -43,21 +97,9 @@
       "employee_filename": "l",
       "assignments": [
         {
-          "task_name": "Data Preprocessing",
-          "start_day": 2,
-          "end_day": 3,
-          "skills_match": [
-            "pandas",
-            "numpy",
-            "python"
-          ],
-          "missing_skills": [],
-          "semantic_match_score": 0.6913579106330872
-        },
-        {
           "task_name": "Pre-trained Model Selection",
-          "start_day": 3,
-          "end_day": 4,
+          "start_day": 8,
+          "end_day": 9,
           "skills_match": [
             "deep learning"
           ],
@@ -67,51 +109,51 @@
           "semantic_match_score": 0.6077526807785034
         },
         {
-          "task_name": "Model Implementation and Training",
-          "start_day": 4,
-          "end_day": 5,
+          "task_name": "Model Implementation",
+          "start_day": 9,
+          "end_day": 13,
           "skills_match": [
             "python"
           ],
           "missing_skills": [
-            "tensorflow",
-            "pytorch"
+            "pytorch",
+            "tensorflow"
           ],
           "semantic_match_score": 0.6154201626777649
+        },
+        {
+          "task_name": "Finalize Project Deliverables",
+          "start_day": 19,
+          "end_day": 20,
+          "skills_match": [
+            "organization"
+          ],
+          "missing_skills": [
+            "project management"
+          ],
+          "semantic_match_score": 0.5642947554588318
         }
       ]
     },
     {
-      "employee_id": "71a7fd7905fd4df6b6d1",
-      "employee_email": "n@gmail.com",
-      "employee_filename": "n",
+      "employee_id": "38e3cf4a816840678272",
+      "employee_email": "va@gmail.com",
+      "employee_filename": "v",
       "assignments": [
         {
-          "task_name": "Model Evaluation and Regularization",
-          "start_day": 5,
-          "end_day": 6,
+          "task_name": "New Task",
+          "start_day": 9,
+          "end_day": 10,
           "skills_match": [
-            "model evaluation"
-          ],
-          "missing_skills": [
-            "regularization techniques"
-          ],
-          "semantic_match_score": 0.4501306414604187
-        },
-        {
-          "task_name": "Model Optimization and Presentation Preparation",
-          "start_day": 6,
-          "end_day": 7,
-          "skills_match": [
-            "presentation skills",
-            "model optimization"
+            "python",
+            "c++"
           ],
           "missing_skills": [],
-          "semantic_match_score": 0.5080390572547913
+          "semantic_match_score": 0.9999997615814209
         }
       ]
     }
   ],
   "unassigned_tasks": [],
-  "rationale": "Requested a team of 5. Formed a team of 4 based on semantic skill matching and availability. 0 tasks could not be assigned."
+  "rationale": "Requested a team of 5. Formed a team of 5 based on semantic skill matching and availability. 0 tasks could not be assigned."
 }
