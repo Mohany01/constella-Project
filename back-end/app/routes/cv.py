@@ -14,6 +14,42 @@ class SkillSaveRequest(BaseModel):
     skills_by_category: Optional[Dict[str, List[constr(min_length=1, max_length=100)]]] = None
 
 
+def _get_table_columns(cur, table_name: str) -> set[str]:
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s
+        """,
+        (table_name,),
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
+def _get_skill_name_column(skill_columns: set[str]) -> str:
+    for column in ("skill_name", "name", "title", "label"):
+        if column in skill_columns:
+            return column
+    raise HTTPException(status_code=500, detail="Skill table has no supported name column.")
+
+
+def _get_skill_category_column(skill_columns: set[str]) -> str | None:
+    for column in ("category", "skill_category", "type"):
+        if column in skill_columns:
+            return column
+    return None
+
+
+def _get_employee_skill_employee_column(employee_skill_columns: set[str]) -> str:
+    for column in ("employee_id", "emp_id", "id"):
+        if column in employee_skill_columns:
+            return column
+    raise HTTPException(
+        status_code=500,
+        detail="Employee skill table has no supported employee id column.",
+    )
+
+
 @router.post("/extract")
 async def extract_cv(
     file: UploadFile = File(...),
@@ -86,43 +122,74 @@ def save_skills(payload: SkillSaveRequest, user=Depends(get_current_user)):
     cur = conn.cursor()
 
     try:
+        skill_columns = _get_table_columns(cur, "skill")
+        employee_skill_columns = _get_table_columns(cur, "employee_skill")
+        skill_name_col = _get_skill_name_column(skill_columns)
+        skill_category_col = _get_skill_category_column(skill_columns)
+        employee_skill_employee_col = _get_employee_skill_employee_column(
+            employee_skill_columns
+        )
         desired_skill_ids = set()
         saved = 0
         for name in sorted(set(skills)):
-            cur.execute("SELECT skill_id FROM skill WHERE name = %s", (name,))
+            select_cols = ["skill_id"]
+            if skill_category_col:
+                select_cols.append(skill_category_col)
+            cur.execute(
+                f"SELECT {', '.join(select_cols)} FROM skill WHERE {skill_name_col} = %s",
+                (name,),
+            )
             row = cur.fetchone()
             if row:
                 skill_id = row[0]
+                existing_category = row[1] if skill_category_col and len(row) > 1 else None
             else:
+                category = categorized_lookup.get(name)
+                insert_data = {skill_name_col: name}
+                if skill_category_col:
+                    insert_data[skill_category_col] = category
+                insert_columns = list(insert_data)
+                placeholders = ", ".join(["%s"] * len(insert_columns))
                 cur.execute(
-                    "INSERT INTO skill (name) VALUES (%s) RETURNING skill_id",
-                    (name,),
+                    f"""
+                    INSERT INTO skill ({", ".join(insert_columns)})
+                    VALUES ({placeholders})
+                    RETURNING skill_id
+                    """,
+                    [insert_data[column] for column in insert_columns],
                 )
                 skill_id = cur.fetchone()[0]
+                existing_category = category
             desired_skill_ids.add(skill_id)
 
+            category = categorized_lookup.get(name)
+            if skill_category_col and category and category != existing_category:
+                cur.execute(
+                    f"""
+                    UPDATE skill
+                    SET {skill_category_col} = %s
+                    WHERE skill_id = %s
+                    """,
+                    (category, skill_id),
+                )
+
             cur.execute(
-                "SELECT 1 FROM employee_skill WHERE emp_id = %s AND skill_id = %s",
+                f"""
+                SELECT 1
+                FROM employee_skill
+                WHERE {employee_skill_employee_col}::text = %s AND skill_id = %s
+                """,
                 (emp_id, skill_id),
             )
             if not cur.fetchone():
                 cur.execute(
-                    "INSERT INTO employee_skill (emp_id, skill_id, category) VALUES (%s, %s, %s)",
-                    (emp_id, skill_id, categorized_lookup.get(name)),
+                    f"""
+                    INSERT INTO employee_skill ({employee_skill_employee_col}, skill_id)
+                    VALUES (%s, %s)
+                    """,
+                    (emp_id, skill_id),
                 )
                 saved += 1
-            else:
-                category = categorized_lookup.get(name)
-                if category:
-                    cur.execute(
-                        """
-                        UPDATE employee_skill
-                        SET category = %s
-                        WHERE emp_id = %s AND skill_id = %s
-                          AND (category IS NULL OR category::text <> %s)
-                        """,
-                        (category, emp_id, skill_id, category),
-                    )
 
         conn.commit()
         return {"saved_skills": saved}
@@ -152,17 +219,24 @@ def skill_suggestions(
     cur = conn.cursor()
 
     try:
+        skill_columns = _get_table_columns(cur, "skill")
+        skill_name_col = _get_skill_name_column(skill_columns)
+        skill_category_col = _get_skill_category_column(skill_columns)
+        category_filter = f"s.{skill_category_col} = %s AND " if skill_category_col else ""
+        params = []
+        if skill_category_col:
+            params.append(category)
+        params.extend([f"{prefix}%", limit])
         cur.execute(
-            """
-            SELECT DISTINCT s.name
+            f"""
+            SELECT DISTINCT s.{skill_name_col}
             FROM employee_skill es
             JOIN skill s ON s.skill_id = es.skill_id
-            WHERE es.category::text = %s
-              AND s.name ILIKE %s
-            ORDER BY s.name
+            WHERE {category_filter}s.{skill_name_col} ILIKE %s
+            ORDER BY s.{skill_name_col}
             LIMIT %s
             """,
-            (category, f"{prefix}%", limit),
+            params,
         )
         suggestions = [row[0] for row in cur.fetchall() if row and row[0]]
         return {"suggestions": suggestions}

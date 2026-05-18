@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { apiClient } from "@/lib/apiClient";
 import {
   Home,
   User,
@@ -22,7 +23,7 @@ const navigationItems = [
   { id: "dashboard", name: "Dashboard", icon: Home, href: "/dashboard" },
   { id: "projects", name: "Projects", icon: FileText, href: "/projects", badge: "3" },
   { id: "tasks", name: "Tasks", icon: ListChecks, href: "/tasks" },
-  { id: "notifications", name: "Notifications", icon: Bell, href: "/notifications", badge: "12" },
+  { id: "notifications", name: "Notifications", icon: Bell, href: "/notifications" },
   { id: "profile", name: "Profile", icon: User, href: "/profile" },
   { id: "settings", name: "Settings", icon: Settings, href: "/settings" },
   { id: "help", name: "Help & Support", icon: HelpCircle, href: "/help" },
@@ -47,6 +48,8 @@ export function Sidebar({ className = "", children }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [activeItem, setActiveItem] = useState("dashboard");
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [activeAlerts, setActiveAlerts] = useState(0);
 
   useEffect(() => {
     const handleResize = () => {
@@ -81,6 +84,62 @@ export function Sidebar({ className = "", children }) {
       }
     } catch {}
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInboxCounts() {
+      try {
+        const [notificationsResult, alertsResult] = await Promise.allSettled([
+          apiClient("/projects/notifications/me", { method: "GET" }),
+          apiClient("/projects/alerts/me", { method: "GET" }),
+        ]);
+        if (cancelled) return;
+        const notificationItems =
+          notificationsResult.status === "fulfilled" &&
+          Array.isArray(notificationsResult.value?.notifications)
+            ? notificationsResult.value.notifications
+            : [];
+        const alertItems =
+          alertsResult.status === "fulfilled" &&
+          Array.isArray(alertsResult.value?.alerts)
+            ? alertsResult.value.alerts
+          : [];
+        setUnreadNotifications(
+          notificationItems.filter((item) => !item?.is_read).length
+        );
+        setActiveAlerts(alertItems.filter((item) => !item?.is_resolved).length);
+      } catch {
+        if (!cancelled) {
+          setUnreadNotifications(0);
+          setActiveAlerts(0);
+        }
+      }
+    }
+
+    loadInboxCounts();
+    const timer = window.setInterval(loadInboxCounts, 30000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const resolvedNavigationItems = useMemo(
+    () =>
+      navigationItems.map((item) =>
+        item.id === "notifications"
+          ? {
+              ...item,
+              badge:
+                unreadNotifications + activeAlerts > 0
+                  ? String(unreadNotifications + activeAlerts)
+                  : undefined,
+            }
+          : item
+      ),
+    [activeAlerts, unreadNotifications]
+  );
 
   const handleItemClick = (itemId) => {
     setActiveItem(itemId);
@@ -167,7 +226,7 @@ export function Sidebar({ className = "", children }) {
 
         <nav className="sidebar-nav" aria-label="Primary navigation">
           <ul>
-            {navigationItems.map((item) => {
+            {resolvedNavigationItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeItem === item.id;
               return (

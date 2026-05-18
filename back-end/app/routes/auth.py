@@ -82,6 +82,28 @@ def create_refresh_token(user_id: str, email: str):
     return jwt.encode(payload, JWT_REFRESH_SECRET, algorithm=JWT_ALGORITHM)
 
 
+def _get_table_columns(cur, table_name: str) -> set[str]:
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s
+        """,
+        (table_name,),
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
+def _get_employee_skill_employee_column(employee_skill_columns: set[str]) -> str:
+    for column in ("employee_id", "emp_id", "id"):
+        if column in employee_skill_columns:
+            return column
+    raise HTTPException(
+        status_code=500,
+        detail="Employee skill table has no supported employee id column.",
+    )
+
+
 def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     response.set_cookie(
         key="refresh_token",
@@ -249,8 +271,6 @@ def _hash_verification_code(code: str, salt: str) -> str:
 
 
 def _create_user(name: str, email: str, password: str, password_is_hashed: bool = False) -> str:
-    # DB id column is VARCHAR(20); use shortened uuid hex (no dashes)
-    user_id = uuid.uuid4().hex[:20]
     hashed_pw = password if password_is_hashed else bcrypt.hashpw(
         password.encode(),
         bcrypt.gensalt(rounds=10),
@@ -263,8 +283,12 @@ def _create_user(name: str, email: str, password: str, password_is_hashed: bool 
 
     try:
         cur.execute(
-            "INSERT INTO employee (id, name, email, password) VALUES (%s, %s, %s, %s) RETURNING id",
-            (user_id, name, email, hashed_pw),
+            """
+            INSERT INTO employee (full_name, email, password)
+            VALUES (%s, %s, %s)
+            RETURNING employee_id
+            """,
+            (name, email, hashed_pw),
         )
         new_id = cur.fetchone()[0]
         conn.commit()
@@ -293,9 +317,9 @@ def _set_existing_user_password(user_id: str, name: str, password: str, password
         cur.execute(
             """
             UPDATE employee
-            SET name = %s, password = %s
-            WHERE id = %s AND (password IS NULL OR password = '')
-            RETURNING id
+            SET full_name = %s, password = %s
+            WHERE employee_id::text = %s AND (password IS NULL OR password = '')
+            RETURNING employee_id
             """,
             (name, hashed_pw, user_id),
         )
@@ -317,7 +341,7 @@ def _find_user_by_email(email: str):
     try:
         cur.execute(
             """
-            SELECT id, password
+            SELECT employee_id, password
             FROM employee
             WHERE LOWER(TRIM(email)) = LOWER(TRIM(%s))
             ORDER BY
@@ -325,7 +349,7 @@ def _find_user_by_email(email: str):
                     WHEN password IS NULL OR BTRIM(password) = '' THEN 0
                     ELSE 1
                 END,
-                id
+                employee_id
             LIMIT 1
             """,
             (email,),
@@ -598,7 +622,7 @@ def password_change_verify(
     cur = conn.cursor()
     try:
         cur.execute(
-            "UPDATE employee SET password = %s WHERE id = %s",
+            "UPDATE employee SET password = %s WHERE employee_id::text = %s",
             (payload["new_password"], user_id),
         )
         conn.commit()
@@ -625,7 +649,15 @@ def login(data: LoginRequest, response: Response):
         raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
     cur = conn.cursor()
 
-    cur.execute("SELECT id, password, name FROM employee WHERE email = %s", (email,))
+    cur.execute(
+        """
+        SELECT employee_id, password, full_name
+        FROM employee
+        WHERE LOWER(TRIM(email)) = LOWER(TRIM(%s))
+        LIMIT 1
+        """,
+        (email,),
+    )
     row = cur.fetchone()
 
     cur.close()
@@ -693,9 +725,9 @@ def get_profile(user=Depends(get_current_user)):
     try:
         cur.execute(
             """
-            SELECT id, name, email, role, department
+            SELECT employee_id, full_name, email, role_id, department_id
             FROM employee
-            WHERE id = %s
+            WHERE employee_id::text = %s
             LIMIT 1
             """,
             (user["id"],),
@@ -704,15 +736,18 @@ def get_profile(user=Depends(get_current_user)):
         if not row:
             raise HTTPException(status_code=404, detail="Profile not found.")
 
+        employee_skill_employee_col = _get_employee_skill_employee_column(
+            _get_table_columns(cur, "employee_skill")
+        )
         cur.execute(
-            """
+            f"""
             SELECT
-              s.name,
-              COALESCE(NULLIF(BTRIM(es.category::text), ''), 'uncategorized') AS category
+              s.skill_name,
+              COALESCE(NULLIF(BTRIM(s.category::text), ''), 'uncategorized') AS category
             FROM employee_skill es
             JOIN skill s ON s.skill_id = es.skill_id
-            WHERE es.emp_id = %s
-            ORDER BY category, s.name
+            WHERE es.{employee_skill_employee_col}::text = %s
+            ORDER BY category, s.skill_name
             """,
             (user["id"],),
         )
@@ -738,8 +773,8 @@ def get_profile(user=Depends(get_current_user)):
             "id": str(row[0]),
             "name": row[1] or "",
             "email": row[2],
-            "role": row[3] or "employee",
-            "department": row[4] or "General",
+            "role": str(row[3]) if row[3] is not None else "employee",
+            "department": str(row[4]) if row[4] is not None else "General",
             "skills_by_category": skills_by_category,
         }
     finally:

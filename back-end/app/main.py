@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from app.alert_scheduler import start_alert_scheduler, stop_alert_scheduler
 from app.routes import auth, cv, projects
 import os
 from dotenv import load_dotenv
@@ -26,6 +27,16 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(cv.router)
 app.include_router(projects.router)
+
+
+@app.on_event("startup")
+async def startup_event():
+    start_alert_scheduler()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await stop_alert_scheduler()
 
 
 def _code_from_status(status_code: int) -> str:

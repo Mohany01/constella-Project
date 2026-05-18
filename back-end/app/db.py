@@ -1,5 +1,6 @@
 # app/db.py
 import os
+import time
 import psycopg2
 from psycopg2 import extensions, pool
 from dotenv import load_dotenv
@@ -7,6 +8,8 @@ from dotenv import load_dotenv
 load_dotenv()  # loads DATABASE_URL from .env
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+DB_POOL_MINCONN = max(1, int(os.getenv("DB_POOL_MINCONN", "1")))
+DB_POOL_MAXCONN = max(DB_POOL_MINCONN, int(os.getenv("DB_POOL_MAXCONN", "12")))
 conn_pool = None
 
 
@@ -16,8 +19,8 @@ def _init_pool():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not set.")
     conn_pool = psycopg2.pool.SimpleConnectionPool(
-        minconn=1,
-        maxconn=5,
+        minconn=DB_POOL_MINCONN,
+        maxconn=DB_POOL_MAXCONN,
         dsn=DATABASE_URL,
         keepalives=1,
         keepalives_idle=30,
@@ -83,7 +86,14 @@ def get_connection():
     try:
         if conn_pool is None or conn_pool.closed:
             _init_pool()
-        conn = conn_pool.getconn()
+        try:
+            conn = conn_pool.getconn()
+        except pool.PoolError as exc:
+            # Short backoff helps during bursty parallel UI requests.
+            print("Connection pool busy, retrying once")
+            print(exc)
+            time.sleep(0.15)
+            conn = conn_pool.getconn()
         if not _is_connection_healthy(conn):
             _discard_connection(conn)
             try:

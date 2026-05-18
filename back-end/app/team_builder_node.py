@@ -82,6 +82,25 @@ class TeamBuilderState(TypedDict, total=False):
 from app.skill_matching import initialize_db
 
 
+def _get_table_columns(cur, table_name: str) -> set[str]:
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s
+        """,
+        (table_name,),
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
+def _get_employee_skill_employee_column(employee_skill_columns: set[str]) -> str:
+    for column in ("employee_id", "emp_id", "id"):
+        if column in employee_skill_columns:
+            return column
+    raise RuntimeError("Employee skill table has no supported employee id column.")
+
+
 def load_employee_skills_from_db() -> List[EmployeeSkill]:
     """Fetch employee skills from the database and normalize to EmployeeSkill models."""
     conn = get_connection()
@@ -90,13 +109,16 @@ def load_employee_skills_from_db() -> List[EmployeeSkill]:
 
     cur = conn.cursor()
     try:
+        employee_skill_employee_col = _get_employee_skill_employee_column(
+            _get_table_columns(cur, "employee_skill")
+        )
         cur.execute(
-            """
-            SELECT e.id, e.name, e.email, s.name
+            f"""
+            SELECT e.employee_id, e.full_name, e.email, s.skill_name
             FROM employee e
-            LEFT JOIN employee_skill es ON e.id = es.emp_id
+            LEFT JOIN employee_skill es ON e.employee_id::text = es.{employee_skill_employee_col}::text
             LEFT JOIN skill s ON es.skill_id = s.skill_id
-            ORDER BY e.name, e.email
+            ORDER BY e.full_name, e.email
             """
         )
         rows = cur.fetchall()
