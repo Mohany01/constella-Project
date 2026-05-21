@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from jose import JWTError, jwt
 
 from app.db import get_connection, release_connection
+from app.permissions import fetch_current_employee
 from app.schemas.auth import (
     LoginRequest,
     MessageResponse,
@@ -498,10 +499,25 @@ def signup_verify(data: SignupVerifyRequest, response: Response):
     token = create_token(user_id=new_id, email=payload["email"])
     refresh_token = create_refresh_token(user_id=new_id, email=payload["email"])
     _set_refresh_cookie(response, refresh_token)
+
+    conn = get_connection()
+    if conn is None:
+        raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
+    cur = conn.cursor()
+    try:
+        employee = fetch_current_employee(
+            cur,
+            {"id": new_id, "email": payload["email"]},
+        )
+    finally:
+        cur.close()
+        release_connection(conn)
+
     return {
         "id": new_id,
         "name": payload["name"],
         "email": payload["email"],
+        "role": employee.get("role") or "",
         "token": token,
     }
 
@@ -649,33 +665,41 @@ def login(data: LoginRequest, response: Response):
         raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
     cur = conn.cursor()
 
-    cur.execute(
-        """
-        SELECT employee_id, password, full_name
-        FROM employee
-        WHERE LOWER(TRIM(email)) = LOWER(TRIM(%s))
-        LIMIT 1
-        """,
-        (email,),
-    )
-    row = cur.fetchone()
+    try:
+        cur.execute(
+            """
+            SELECT employee_id, password, full_name
+            FROM employee
+            WHERE LOWER(TRIM(email)) = LOWER(TRIM(%s))
+            LIMIT 1
+            """,
+            (email,),
+        )
+        row = cur.fetchone()
 
-    cur.close()
-    release_connection(conn)
+        if not row:
+            raise HTTPException(status_code=401, detail="Wrong username or password")
 
-    if not row:
-        raise HTTPException(status_code=401, detail="Wrong username or password")
+        user_id, stored_pw, name = row
 
-    user_id, stored_pw, name = row
+        if not bcrypt.checkpw(password.encode(), stored_pw.encode()):
+            raise HTTPException(status_code=401, detail="Wrong username or password")
 
-    if not bcrypt.checkpw(password.encode(), stored_pw.encode()):
-        raise HTTPException(status_code=401, detail="Wrong username or password")
+        token = create_token(user_id=str(user_id), email=email)
+        refresh_token = create_refresh_token(user_id=str(user_id), email=email)
+        _set_refresh_cookie(response, refresh_token)
+        employee = fetch_current_employee(cur, {"id": str(user_id), "email": email})
+    finally:
+        cur.close()
+        release_connection(conn)
 
-    token = create_token(user_id=str(user_id), email=email)
-    refresh_token = create_refresh_token(user_id=str(user_id), email=email)
-    _set_refresh_cookie(response, refresh_token)
-
-    return {"id": str(user_id), "name": name, "email": email, "token": token}
+    return {
+        "id": str(user_id),
+        "name": name,
+        "email": email,
+        "role": employee.get("role") or "",
+        "token": token,
+    }
 
 
 # ----------------------
@@ -723,18 +747,7 @@ def get_profile(user=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
     cur = conn.cursor()
     try:
-        cur.execute(
-            """
-            SELECT employee_id, full_name, email, role_id, department_id
-            FROM employee
-            WHERE employee_id::text = %s
-            LIMIT 1
-            """,
-            (user["id"],),
-        )
-        row = cur.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Profile not found.")
+        employee = fetch_current_employee(cur, user)
 
         employee_skill_employee_col = _get_employee_skill_employee_column(
             _get_table_columns(cur, "employee_skill")
@@ -770,11 +783,11 @@ def get_profile(user=Depends(get_current_user)):
             skills_by_category[key] = sorted(set(skills_by_category[key]))
 
         return {
-            "id": str(row[0]),
-            "name": row[1] or "",
-            "email": row[2],
-            "role": str(row[3]) if row[3] is not None else "employee",
-            "department": str(row[4]) if row[4] is not None else "General",
+            "id": employee.get("employee_id") or employee.get("id") or "",
+            "name": employee.get("name") or "",
+            "email": employee.get("email") or "",
+            "role": employee.get("role") or "Employee",
+            "department": employee.get("department_id") or "General",
             "skills_by_category": skills_by_category,
         }
     finally:

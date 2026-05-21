@@ -1,6 +1,7 @@
 import "../styles/globals.css";
 import "../styles/teamBuilderV2.css";
 import { Inter, Manrope } from "next/font/google";
+import Providers from "./providers";
 
 const bodyFont = Inter({
   subsets: ["latin"],
@@ -28,7 +29,9 @@ export default function RootLayout({ children }) {
         <link rel="icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" href="/icon.png" />
       </head>
-      <body>{children}</body>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

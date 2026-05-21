@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiClient } from "../lib/apiClient";
+import { USER_ROLES, normalizeRole } from "../lib/auth";
+import { persistUserSession, syncCurrentUserProfile } from "../lib/auth-client";
 import { safeLocalStorageSet } from "../lib/storage";
 
 const OTP_LENGTH = 6;
@@ -22,7 +24,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
   const [showPassword, setShowPassword] = useState(false);
 
   // Step 2
-  const [role, setRole] = useState("project_manager");
+  const [role, setRole] = useState("employee");
   const [skills, setSkills] = useState([]);
   const [manualGroups, setManualGroups] = useState({
     core_hard_skills: [],
@@ -68,6 +70,8 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     []
   );
   const miniStepsTotal = role === "employee" ? 1 : 0;
+  const accountRoleLabel =
+    role === "project_manager" ? "Project Manager" : "Employee";
 
   // Errors and messages
   const [emailError, setEmailError] = useState("");
@@ -347,14 +351,29 @@ export default function SignupForm({ className = "", step: externalStep, setStep
     []
   );
 
-  function completeAuthSuccess(data) {
+  function resolveAccountRole(value) {
+    return normalizeRole(value) === USER_ROLES.PROJECT_MANAGER
+      ? "project_manager"
+      : "employee";
+  }
+
+  async function completeAuthSuccess(data) {
     if (typeof window !== "undefined" && data?.token) {
       safeLocalStorageSet("token", data.token);
-      safeLocalStorageSet(
-        "user",
-        JSON.stringify({ id: data.id, name: data.name, email: data.email })
-      );
+      persistUserSession({
+        id: data.id,
+        name: data.name,
+        email: data.email,
+        role: data.role,
+      });
     }
+    const profile = await syncCurrentUserProfile({
+      id: data?.id,
+      name: data?.name,
+      email: data?.email,
+      role: data?.role,
+    });
+    setRole(resolveAccountRole(profile?.role || data?.role));
     setVerificationCode(Array(OTP_LENGTH).fill(""));
     setShowVerificationModal(false);
     setMessage("Account verified successfully.");
@@ -425,7 +444,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
           code,
         }),
       });
-      completeAuthSuccess(data);
+      await completeAuthSuccess(data);
     } catch (error) {
       setIsError(true);
       setMessage(error.message || "Verification failed.");
@@ -741,19 +760,11 @@ export default function SignupForm({ className = "", step: externalStep, setStep
 
               <div className="field">
                 <label>Account Type</label>
-                <div className="segment">
-                  {["project_manager", "employee"].map((option) => (
-                    <button
-                  key={option}
-                  type="button"
-                  className={`segment-btn ${role === option ? "active" : ""}`}
-                  onClick={() => setRole(option)}
-                  aria-pressed={role === option}
-                >
-                  {option === "project_manager" ? "Project Manager" : "Employee"}
-                </button>
-              ))}
-            </div>
+                <div className="segment" aria-label="Account type from your employee profile">
+                  <span className="segment-btn active" aria-current="true">
+                    {accountRoleLabel}
+                  </span>
+                </div>
           </div>
 
           {role === "employee" && (
@@ -767,7 +778,7 @@ export default function SignupForm({ className = "", step: externalStep, setStep
                 <div className="upload-info">
                   <p className="upload-title">Upload your CV</p>
                   <p className="upload-sub">
-                    PDF or DOCX. We'll extract skills automatically.
+                    PDF or DOCX. We&apos;ll extract skills automatically.
                   </p>
                   <label className="upload-btn">
                     <input

@@ -828,7 +828,14 @@ export function ProjectAnalyzerModal({ open, onClose, onComplete }) {
   );
 }
 
-export function ProjectAnalysisModal({ open, onClose, analysis, onSave, isSaved }) {
+export function ProjectAnalysisModal({
+  open,
+  onClose,
+  analysis,
+  onSave,
+  isSaved,
+  readOnly = false,
+}) {
   return (
     <GeneratedTasksModal
       open={open}
@@ -836,6 +843,7 @@ export function ProjectAnalysisModal({ open, onClose, analysis, onSave, isSaved 
       onSave={onSave}
       analysis={analysis}
       isSaved={isSaved}
+      readOnly={readOnly}
     />
   );
 }

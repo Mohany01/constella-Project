@@ -11,6 +11,17 @@ from pydantic import BaseModel, Field
 
 from app.common_imports import HumanMessage, PdfReader, json
 from app.db import get_connection, release_connection
+from app.permissions import (
+    can_view_task_record,
+    ensure_project_access,
+    ensure_project_management_access,
+    ensure_project_team_access,
+    ensure_task_move_access,
+    fetch_current_employee,
+    get_accessible_project_ids,
+    get_role_name_select_expression,
+    is_project_manager,
+)
 from app.alert_agent import advance_ready_tasks, run_deadline_alert_agent
 from app.auth_guard import get_current_user
 from app.learning_path_node import learning_path_node
@@ -106,6 +117,14 @@ class ProjectTaskInput(BaseModel):
     description: Optional[str] = ""
     depends_on: Optional[List[str]] = None
     skills: Optional[List[str]] = None
+    status: Optional[str] = None
+    category: Optional[str] = None
+    tag: Optional[str] = None
+    progress: Optional[int] = Field(None, ge=0, le=100)
+    assigned_to: Optional[str] = None
+    assignedTo: Optional[str] = None
+    assigneeIds: Optional[List[str]] = None
+    memberIds: Optional[List[str]] = None
     start_days_from_kickoff: int = Field(0, ge=0)
     duration_days: int = Field(1, ge=1)
 
@@ -128,13 +147,21 @@ class TaskStatusUpdateRequest(BaseModel):
 
 
 TASK_STATUS_ALIASES = {
+    "": "Not Started",
     "not started": "Not Started",
+    "not_started": "Not Started",
     "todo": "Not Started",
     "to do": "Not Started",
+    "to_do": "Not Started",
+    "pending": "Not Started",
     "in progress": "In Progress",
     "in_progress": "In Progress",
+    "progress": "In Progress",
     "doing": "In Progress",
-    "blocked": "Blocked",
+    "review": "Review",
+    "in review": "Review",
+    "qa": "Review",
+    "blocked": "Review",
     "done": "Completed",
     "complete": "Completed",
     "completed": "Completed",
@@ -155,6 +182,45 @@ def _normalize_task_status(status_value: str) -> str:
 
 def _is_completed_task_status(status_value: str) -> bool:
     return str(status_value or "").strip().lower() in {"completed", "complete", "done"}
+
+
+def _task_status_progress_hint(status_value: str) -> int:
+    normalized = str(status_value or "").strip().lower()
+    if normalized in {"completed", "complete", "done"}:
+        return 100
+    if normalized in {"review", "in review", "qa"}:
+        return 80
+    if normalized in {"in progress", "in_progress", "doing"}:
+        return 55
+    return 0
+
+
+def _normalize_task_progress(progress_value: Any, normalized_status: str) -> int:
+    try:
+        progress = int(progress_value)
+    except Exception:
+        progress = 100 if _is_completed_task_status(normalized_status) else 0
+    return max(0, min(100, progress))
+
+
+def _extract_task_assignee_ids(task: Any) -> List[str]:
+    values: List[str] = []
+    seen = set()
+    for field in ("assigned_to", "assignedTo"):
+        raw = getattr(task, field, None)
+        text = str(raw or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            values.append(text)
+
+    for field in ("assigneeIds", "memberIds"):
+        raw_values = getattr(task, field, None) or []
+        for raw in raw_values:
+            text = str(raw or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                values.append(text)
+    return values
 
 
 def _get_table_columns(cur, table_name: str):
@@ -616,10 +682,234 @@ def _project_row_to_dict(row):
     }
 
 
+def _load_project_members(
+    cur, project_ids: List[int]
+) -> Dict[int, List[Dict[str, Any]]]:
+    if not project_ids:
+        return {}
+
+    member_table, employee_column = _find_project_member_table(cur)
+    if not member_table or not employee_column:
+        return {}
+
+    employee_columns = _get_table_columns(cur, "employee")
+    role_columns = _get_table_columns(cur, "role")
+    role_join = ""
+    if "role_id" in employee_columns and "role_id" in role_columns:
+        role_join = "LEFT JOIN role r ON r.role_id = e.role_id"
+    role_expression = get_role_name_select_expression(cur)
+
+    cur.execute(
+        f"""
+        SELECT
+            pm.project_id,
+            e.employee_id::text AS employee_id,
+            e.full_name,
+            e.email,
+            {role_expression} AS role_name
+        FROM {member_table} pm
+        JOIN employee e ON e.employee_id::text = pm.{employee_column}::text
+        {role_join}
+        WHERE pm.project_id = ANY(%s)
+        ORDER BY pm.project_id, e.full_name, e.email
+        """,
+        (project_ids,),
+    )
+
+    members_by_project: Dict[int, List[Dict[str, Any]]] = {}
+    seen_keys = set()
+
+    for project_id, employee_id, full_name, email, role_name in cur.fetchall():
+        if project_id is None or employee_id is None:
+            continue
+        unique_key = (int(project_id), str(employee_id))
+        if unique_key in seen_keys:
+            continue
+        seen_keys.add(unique_key)
+        members_by_project.setdefault(int(project_id), []).append(
+            {
+                "id": str(employee_id),
+                "employee_id": str(employee_id),
+                "name": full_name or email or "Member",
+                "employee_filename": full_name or email or "Member",
+                "email": email or "",
+                "employee_email": email or "",
+                "role": role_name or "",
+                "employee_role": role_name or "",
+            }
+        )
+
+    return members_by_project
+
+
+def _load_employees_by_ids(cur, employee_ids: List[Any]) -> Dict[str, Dict[str, Any]]:
+    normalized_ids = []
+    seen_ids = set()
+    for value in employee_ids or []:
+        text = str(value or "").strip()
+        if not text or text in seen_ids:
+            continue
+        seen_ids.add(text)
+        normalized_ids.append(text)
+
+    if not normalized_ids:
+        return {}
+
+    employee_columns = _get_table_columns(cur, "employee")
+    role_columns = _get_table_columns(cur, "role")
+    role_join = ""
+    if "role_id" in employee_columns and "role_id" in role_columns:
+        role_join = "LEFT JOIN role r ON r.role_id = e.role_id"
+    role_expression = get_role_name_select_expression(cur)
+
+    cur.execute(
+        f"""
+        SELECT
+            e.employee_id::text AS employee_id,
+            e.full_name,
+            e.email,
+            {role_expression} AS role_name
+        FROM employee e
+        {role_join}
+        WHERE e.employee_id::text = ANY(%s)
+        """,
+        (normalized_ids,),
+    )
+
+    employees_by_id: Dict[str, Dict[str, Any]] = {}
+    for employee_id, full_name, email, role_name in cur.fetchall():
+        if employee_id is None:
+            continue
+        employee_key = str(employee_id)
+        employees_by_id[employee_key] = {
+            "id": employee_key,
+            "employee_id": employee_key,
+            "name": full_name or email or "Member",
+            "employee_filename": full_name or email or "Member",
+            "email": email or "",
+            "employee_email": email or "",
+            "role": role_name or "",
+            "employee_role": role_name or "",
+        }
+
+    return employees_by_id
+
+
+def _attach_task_assignments(cur, tasks_by_id: Dict[int, Dict[str, Any]]) -> None:
+    if not tasks_by_id:
+        return
+
+    for task in tasks_by_id.values():
+        task.setdefault("assigneeIds", [])
+        task.setdefault("memberIds", [])
+        task.setdefault("assignees", [])
+        task.setdefault("members", [])
+        if "progress" not in task and "progress_percent" in task:
+            task["progress"] = task.get("progress_percent")
+
+    employee_task_columns = _get_table_columns(cur, "employee_task")
+    employee_task_employee_col = _get_employee_link_column(employee_task_columns)
+    if "task_id" not in employee_task_columns or not employee_task_employee_col:
+        return
+
+    employee_columns = _get_table_columns(cur, "employee")
+    role_columns = _get_table_columns(cur, "role")
+    role_join = ""
+    if "role_id" in employee_columns and "role_id" in role_columns:
+        role_join = "LEFT JOIN role r ON r.role_id = e.role_id"
+    role_expression = get_role_name_select_expression(cur)
+    task_ids = list(tasks_by_id.keys())
+
+    cur.execute(
+        f"""
+        SELECT
+            et.task_id,
+            e.employee_id::text AS employee_id,
+            e.full_name,
+            e.email,
+            {role_expression} AS role_name
+        FROM employee_task et
+        JOIN employee e ON e.employee_id::text = et.{employee_task_employee_col}::text
+        {role_join}
+        WHERE et.task_id = ANY(%s)
+        ORDER BY et.task_id, e.full_name, e.email
+        """,
+        (task_ids,),
+    )
+    for task_id, employee_id, full_name, email, role_name in cur.fetchall():
+        task = tasks_by_id.get(int(task_id))
+        if not task:
+            continue
+        assignee = {
+            "id": str(employee_id),
+            "employee_id": str(employee_id),
+            "name": full_name or email or "Member",
+            "email": email or "",
+            "role": role_name or "",
+            "employee_role": role_name or "",
+        }
+        task["assignees"].append(assignee)
+        task["members"].append(assignee)
+        task["assigneeIds"].append(str(employee_id))
+        task["memberIds"].append(str(employee_id))
+        task.setdefault("assigned_to", str(employee_id))
+        task.setdefault("assignedTo", str(employee_id))
+
+    owner_employee_ids = [
+        task.get("owner_employee_id")
+        for task in tasks_by_id.values()
+        if task.get("owner_employee_id")
+    ]
+    employees_by_id = _load_employees_by_ids(cur, owner_employee_ids)
+
+    for task in tasks_by_id.values():
+        owner_employee_id = str(task.get("owner_employee_id") or "").strip()
+        if not owner_employee_id:
+            continue
+
+        task.setdefault("assigned_to", owner_employee_id)
+        task.setdefault("assignedTo", owner_employee_id)
+
+        if owner_employee_id in {
+            str(value).strip() for value in task.get("assigneeIds", []) if value is not None
+        }:
+            continue
+
+        assignee = employees_by_id.get(owner_employee_id) or {
+            "id": owner_employee_id,
+            "employee_id": owner_employee_id,
+            "name": f"Employee {owner_employee_id}",
+            "employee_filename": f"Employee {owner_employee_id}",
+            "email": "",
+            "employee_email": "",
+            "role": "",
+            "employee_role": "",
+        }
+        task["assignees"].append(assignee)
+        task["members"].append(assignee)
+        task["assigneeIds"].append(owner_employee_id)
+        task["memberIds"].append(owner_employee_id)
+
+
+def _filter_project_tasks_for_employee(
+    employee: Dict[str, Any],
+    tasks_by_project: Dict[int, List[Dict[str, Any]]],
+) -> Dict[int, List[Dict[str, Any]]]:
+    if is_project_manager(employee):
+        return tasks_by_project
+
+    filtered: Dict[int, List[Dict[str, Any]]] = {}
+    for project_id, tasks in tasks_by_project.items():
+        filtered[project_id] = [
+            task for task in tasks if can_view_task_record(employee, task)
+        ]
+    return filtered
+
+
 @router.get("")
 def list_projects(user=Depends(get_current_user)):
-    manager_id = user.get("id")
-    if not manager_id:
+    user_id = user.get("id")
+    if not user_id:
         raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
 
     conn = get_connection()
@@ -628,19 +918,21 @@ def list_projects(user=Depends(get_current_user)):
     cur = conn.cursor()
 
     try:
+        current_employee = fetch_current_employee(cur, user)
         project_columns = _get_table_columns(cur, "project")
         project_select = _project_select_clause(project_columns)
-        cur.execute(
-            f"""
-            SELECT {project_select}
-            FROM project
-            WHERE manager_id::text = %s
-            ORDER BY project_id DESC
-            """,
-            (str(manager_id),),
-        )
+        accessible_project_ids = get_accessible_project_ids(cur, current_employee)
+        if not accessible_project_ids:
+            return {"projects": []}
+
+        query = f"SELECT {project_select} FROM project"
+        params: List[Any] = [sorted(accessible_project_ids)]
+        query += " WHERE project_id = ANY(%s)"
+        query += " ORDER BY project_id DESC"
+        cur.execute(query, params)
         rows = cur.fetchall()
         project_ids = [row[0] for row in rows]
+        project_members_by_project = _load_project_members(cur, project_ids)
         tasks_by_project: Dict[int, List[Dict[str, Any]]] = {
             project_id: [] for project_id in project_ids
         }
@@ -659,9 +951,13 @@ def list_projects(user=Depends(get_current_user)):
                     for col in (
                         "description",
                         "status",
+                        "progress_percent",
                         "estimated_hours",
                         "priority",
                         "deadline",
+                        "owner_employee_id",
+                        "category",
+                        "tag",
                         "start_days_from_kickoff",
                         "duration_days",
                     )
@@ -685,6 +981,8 @@ def list_projects(user=Depends(get_current_user)):
                             task["deadline"] = _serialize_task_value(task["deadline"])
                         task.setdefault("depends_on", [])
                         task.setdefault("skills", [])
+                        if "progress_percent" in task and "progress" not in task:
+                            task["progress"] = task.get("progress_percent")
                         project_id = task.get("project_id")
                         if project_id in tasks_by_project:
                             tasks_by_project[project_id].append(task)
@@ -782,6 +1080,12 @@ def list_projects(user=Depends(get_current_user)):
                                 if task_id in tasks_by_id:
                                     tasks_by_id[task_id]["skills"].append(skill_name)
 
+                    _attach_task_assignments(cur, tasks_by_id)
+                    tasks_by_project = _filter_project_tasks_for_employee(
+                        current_employee,
+                        tasks_by_project,
+                    )
+
         team_by_project: Dict[int, Dict[str, Any]] = {}
         if project_ids and tasks_by_id:
             task_name_col = _get_task_name_column(_get_table_columns(cur, "task"))
@@ -793,24 +1097,65 @@ def list_projects(user=Depends(get_current_user)):
                 and "task_id" in employee_task_columns
                 and employee_task_employee_col
             ):
+                employee_columns = _get_table_columns(cur, "employee")
+                role_columns = _get_table_columns(cur, "role")
+                role_join = ""
+                if "role_id" in employee_columns and "role_id" in role_columns:
+                    role_join = "LEFT JOIN role r ON r.role_id = e.role_id"
+                role_expression = get_role_name_select_expression(cur)
                 cur.execute(
                     f"""
                     SELECT t.project_id,
                            e.employee_id,
                            e.full_name,
                            e.email,
-                           e.role_id::text AS role,
+                           {role_expression} AS role,
                            t.task_id,
                            t.{task_name_col}
                     FROM employee_task et
                     JOIN task t ON t.task_id = et.task_id
                     JOIN employee e ON e.employee_id::text = et.{employee_task_employee_col}::text
+                    {role_join}
                     WHERE t.project_id = ANY(%s)
                     ORDER BY t.project_id, e.full_name, t.{task_name_col}
                     """,
                     (project_ids,),
                 )
                 assignment_rows = cur.fetchall()
+
+            employee_lookup = _load_employees_by_ids(
+                cur,
+                [
+                    task.get("owner_employee_id")
+                    for task in tasks_by_id.values()
+                    if task.get("owner_employee_id")
+                ],
+            )
+            existing_assignment_keys = {
+                (int(task_id), str(emp_id))
+                for proj_id, emp_id, emp_name, emp_email, emp_role, task_id, task_name in assignment_rows
+                if task_id is not None and emp_id is not None
+            }
+            for task_id, task in tasks_by_id.items():
+                owner_employee_id = str(task.get("owner_employee_id") or "").strip()
+                if not owner_employee_id:
+                    continue
+                assignment_key = (int(task_id), owner_employee_id)
+                if assignment_key in existing_assignment_keys:
+                    continue
+                employee = employee_lookup.get(owner_employee_id, {})
+                assignment_rows.append(
+                    (
+                        task.get("project_id"),
+                        owner_employee_id,
+                        employee.get("employee_filename") or employee.get("name") or f"Employee {owner_employee_id}",
+                        employee.get("employee_email") or employee.get("email") or "",
+                        employee.get("employee_role") or employee.get("role") or "",
+                        task_id,
+                        task.get("name"),
+                    )
+                )
+                existing_assignment_keys.add(assignment_key)
 
             members_map: Dict[int, Dict[str, Dict[str, Any]]] = {}
             assigned_tasks: Dict[int, set] = {}
@@ -861,12 +1206,60 @@ def list_projects(user=Depends(get_current_user)):
                     "rationale": "Loaded from saved assignments.",
                 }
 
+        for project_id in project_ids:
+            project_members = project_members_by_project.get(project_id, [])
+            if not project_members:
+                continue
+
+            mapped_members = [
+                {
+                    "employee_id": member["employee_id"],
+                    "employee_filename": member["employee_filename"],
+                    "employee_email": member["employee_email"],
+                    "employee_role": member["employee_role"],
+                    "assignments": [],
+                }
+                for member in project_members
+            ]
+
+            if project_id not in team_by_project:
+                team_by_project[project_id] = {
+                    "team": mapped_members,
+                    "unassigned_tasks": [
+                        task.get("name")
+                        for task in tasks_by_project.get(project_id, [])
+                        if task.get("name")
+                    ],
+                    "num_employees": len(mapped_members),
+                    "rationale": "Loaded from saved team members.",
+                }
+                continue
+
+            existing_team = team_by_project[project_id].get("team", [])
+            existing_member_ids = {
+                str(member.get("employee_id") or "").strip()
+                for member in existing_team
+                if member.get("employee_id") is not None
+            }
+            for member in mapped_members:
+                member_id = str(member.get("employee_id") or "").strip()
+                if not member_id or member_id in existing_member_ids:
+                    continue
+                existing_team.append(member)
+                existing_member_ids.add(member_id)
+            team_by_project[project_id]["team"] = existing_team
+            team_by_project[project_id]["num_employees"] = len(existing_team)
+
         projects: List[Dict[str, Any]] = []
         for row in rows:
             project_dict = _project_row_to_dict(row)
             if project_dict:
                 project_id = project_dict.get("project_id")
                 project_dict["tasks"] = tasks_by_project.get(project_id, [])
+                project_dict["members"] = project_members_by_project.get(project_id, [])
+                project_dict["assignedUsers"] = project_members_by_project.get(
+                    project_id, []
+                )
                 if project_id in team_by_project:
                     project_dict["team"] = team_by_project[project_id]
                 projects.append(project_dict)
@@ -896,9 +1289,13 @@ def _load_project_tasks(cur, project_id: int):
         for col in (
             "description",
             "status",
+            "progress_percent",
             "estimated_hours",
             "priority",
             "deadline",
+            "owner_employee_id",
+            "category",
+            "tag",
             "start_days_from_kickoff",
             "duration_days",
         )
@@ -924,6 +1321,8 @@ def _load_project_tasks(cur, project_id: int):
             task["deadline"] = _serialize_task_value(task["deadline"])
         task.setdefault("depends_on", [])
         task.setdefault("skills", [])
+        if "progress_percent" in task and "progress" not in task:
+            task["progress"] = task.get("progress_percent")
         tasks_by_project[project_id].append(task)
         if "task_id" in task and task["task_id"] is not None:
             tasks_by_id[task["task_id"]] = task
@@ -1015,6 +1414,7 @@ def _load_project_tasks(cur, project_id: int):
             if task_id in tasks_by_id:
                 tasks_by_id[task_id]["skills"].append(skill_name)
 
+    _attach_task_assignments(cur, tasks_by_id)
     return tasks_by_project, tasks_by_id
 
 
@@ -1026,35 +1426,67 @@ def _load_project_team(cur, project_id: int, tasks_by_project, tasks_by_id):
         task_name_col = _get_task_name_column(_get_table_columns(cur, "task"))
         employee_task_columns = _get_table_columns(cur, "employee_task")
         employee_task_employee_col = _get_employee_link_column(employee_task_columns)
-        if (
-            not task_name_col
-            or "task_id" not in employee_task_columns
-            or not employee_task_employee_col
-        ):
-            return {
-                "team": [],
-                "unassigned_tasks": [],
-                "num_employees": 0,
-                "rationale": "Loaded from saved assignments.",
-            }
-        cur.execute(
-            f"""
-            SELECT t.project_id,
-                   e.employee_id,
-                   e.full_name,
-                   e.email,
-                   e.role_id::text AS role,
-                   t.task_id,
-                   t.{task_name_col}
-            FROM employee_task et
-            JOIN task t ON t.task_id = et.task_id
-            JOIN employee e ON e.employee_id::text = et.{employee_task_employee_col}::text
-            WHERE t.project_id = %s
-            ORDER BY e.full_name, t.{task_name_col}
-            """,
-            (project_id,),
+        employee_columns = _get_table_columns(cur, "employee")
+        role_columns = _get_table_columns(cur, "role")
+        role_join = ""
+        if "role_id" in employee_columns and "role_id" in role_columns:
+            role_join = "LEFT JOIN role r ON r.role_id = e.role_id"
+        assignment_rows = []
+        if task_name_col and "task_id" in employee_task_columns and employee_task_employee_col:
+            cur.execute(
+                f"""
+                SELECT t.project_id,
+                       e.employee_id,
+                       e.full_name,
+                       e.email,
+                       {get_role_name_select_expression(cur)} AS role,
+                       t.task_id,
+                       t.{task_name_col}
+                FROM employee_task et
+                JOIN task t ON t.task_id = et.task_id
+                JOIN employee e ON e.employee_id::text = et.{employee_task_employee_col}::text
+                {role_join}
+                WHERE t.project_id = %s
+                ORDER BY e.full_name, t.{task_name_col}
+                """,
+                (project_id,),
+            )
+            assignment_rows = cur.fetchall()
+
+        employee_lookup = _load_employees_by_ids(
+            cur,
+            [
+                task.get("owner_employee_id")
+                for task in tasks_by_id.values()
+                if task.get("owner_employee_id")
+            ],
         )
-        assignment_rows = cur.fetchall()
+        existing_assignment_keys = {
+            (int(task_id), str(emp_id))
+            for _, emp_id, _, _, _, task_id, _ in assignment_rows
+            if task_id is not None and emp_id is not None
+        }
+        for task_id, task in tasks_by_id.items():
+            owner_employee_id = str(task.get("owner_employee_id") or "").strip()
+            task_name = task.get("name")
+            if not owner_employee_id or not task_name:
+                continue
+            assignment_key = (int(task_id), owner_employee_id)
+            if assignment_key in existing_assignment_keys:
+                continue
+            employee = employee_lookup.get(owner_employee_id, {})
+            assignment_rows.append(
+                (
+                    project_id,
+                    owner_employee_id,
+                    employee.get("employee_filename") or employee.get("name") or f"Employee {owner_employee_id}",
+                    employee.get("employee_email") or employee.get("email") or "",
+                    employee.get("employee_role") or employee.get("role") or "",
+                    task_id,
+                    task_name,
+                )
+            )
+            existing_assignment_keys.add(assignment_key)
 
         for _, emp_id, emp_name, emp_email, emp_role, task_id, task_name in assignment_rows:
             task = tasks_by_id.get(task_id, {})
@@ -1102,8 +1534,7 @@ def _load_project_team(cur, project_id: int, tasks_by_project, tasks_by_id):
 
 @router.get("/employees")
 def list_employees(user=Depends(get_current_user)):
-    manager_id = user.get("id")
-    if not manager_id:
+    if not user.get("id"):
         raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
 
     conn = get_connection()
@@ -1112,11 +1543,19 @@ def list_employees(user=Depends(get_current_user)):
     cur = conn.cursor()
 
     try:
+        current_employee = fetch_current_employee(cur, user)
+        ensure_project_management_access(cur, current_employee)
+        employee_columns = _get_table_columns(cur, "employee")
+        role_columns = _get_table_columns(cur, "role")
+        role_join = ""
+        if "role_id" in employee_columns and "role_id" in role_columns:
+            role_join = "LEFT JOIN role r ON r.role_id = e.role_id"
         cur.execute(
-            """
-            SELECT employee_id, full_name, email, role_id::text AS role
-            FROM employee
-            ORDER BY full_name, email
+            f"""
+            SELECT e.employee_id, e.full_name, e.email, {get_role_name_select_expression(cur)} AS role
+            FROM employee e
+            {role_join}
+            ORDER BY e.full_name, e.email
             """
         )
         rows = cur.fetchall()
@@ -1137,8 +1576,7 @@ def get_project(
     project_id: int,
     user=Depends(get_current_user),
 ):
-    manager_id = user.get("id")
-    if not manager_id:
+    if not user.get("id"):
         raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
 
     conn = get_connection()
@@ -1147,23 +1585,32 @@ def get_project(
     cur = conn.cursor()
 
     try:
+        current_employee = fetch_current_employee(cur, user)
+        ensure_project_access(cur, current_employee, project_id)
         project_columns = _get_table_columns(cur, "project")
         project_select = _project_select_clause(project_columns)
         cur.execute(
             f"""
             SELECT {project_select}
             FROM project
-            WHERE project_id = %s AND manager_id::text = %s
+            WHERE project_id = %s
             """,
-            (project_id, str(manager_id)),
+            (project_id,),
         )
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
 
         project_dict = _project_row_to_dict(row)
+        project_members = _load_project_members(cur, [project_id]).get(project_id, [])
         tasks_by_project, tasks_by_id = _load_project_tasks(cur, project_id)
+        tasks_by_project = _filter_project_tasks_for_employee(
+            current_employee,
+            tasks_by_project,
+        )
         project_dict["tasks"] = tasks_by_project.get(project_id, [])
+        project_dict["members"] = project_members
+        project_dict["assignedUsers"] = project_members
         team_payload = _load_project_team(
             cur, project_id, tasks_by_project, tasks_by_id
         )
@@ -1181,8 +1628,7 @@ def get_project(
 
 @router.get("/{project_id}/team")
 def get_project_team(project_id: int, user=Depends(get_current_user)):
-    manager_id = user.get("id")
-    if not manager_id:
+    if not user.get("id"):
         raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
 
     conn = get_connection()
@@ -1191,12 +1637,8 @@ def get_project_team(project_id: int, user=Depends(get_current_user)):
     cur = conn.cursor()
 
     try:
-        cur.execute(
-            "SELECT project_id FROM project WHERE project_id = %s AND manager_id::text = %s",
-            (project_id, str(manager_id)),
-        )
-        if not cur.fetchone():
-            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
+        current_employee = fetch_current_employee(cur, user)
+        ensure_project_team_access(cur, current_employee, project_id)
 
         tasks_by_project, tasks_by_id = _load_project_tasks(cur, project_id)
         team_payload = _load_project_team(cur, project_id, tasks_by_project, tasks_by_id)
@@ -1229,12 +1671,24 @@ def _extract_pdf_text(upload: UploadFile) -> str:
 
 @router.post("/analyze")
 async def analyze_project(
+    user=Depends(get_current_user),
     name: str = Form(...),
     description: Optional[str] = Form(None),
     skills: Optional[str] = Form(None),
     project_deadline_days: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
 ):
+    conn = get_connection()
+    if conn is None:
+        raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
+    cur = conn.cursor()
+    try:
+        current_employee = fetch_current_employee(cur, user)
+        ensure_project_management_access(cur, current_employee)
+    finally:
+        cur.close()
+        release_connection(conn)
+
     if not name.strip():
         raise HTTPException(status_code=400, detail="Project name is required.")
 
@@ -1305,8 +1759,7 @@ def save_project(payload: ProjectSaveRequest, user=Depends(get_current_user)):
     if not name:
         raise HTTPException(status_code=400, detail="Project name is required.")
 
-    manager_id = user.get("id")
-    if not manager_id:
+    if not user.get("id"):
         raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
 
     conn = get_connection()
@@ -1315,6 +1768,8 @@ def save_project(payload: ProjectSaveRequest, user=Depends(get_current_user)):
     cur = conn.cursor()
 
     try:
+        current_employee = fetch_current_employee(cur, user)
+        ensure_project_management_access(cur, current_employee, payload.project_id)
         project_columns = _get_table_columns(cur, "project")
         project_name_col = _get_project_name_column(project_columns)
         project_budget_col = _get_project_budget_column(project_columns)
@@ -1332,10 +1787,10 @@ def save_project(payload: ProjectSaveRequest, user=Depends(get_current_user)):
                 f"""
                 UPDATE project
                 SET {set_clause}
-                WHERE project_id = %s AND manager_id::text = %s
+                WHERE project_id = %s
                 RETURNING {project_select}
                 """,
-                list(update_data.values()) + [payload.project_id, str(manager_id)],
+                list(update_data.values()) + [payload.project_id],
             )
         else:
             insert_data: Dict[str, Any] = {project_name_col: name}
@@ -1349,7 +1804,7 @@ def save_project(payload: ProjectSaveRequest, user=Depends(get_current_user)):
                 insert_data["end_date"] = None
             if "deadline" in project_columns:
                 insert_data["deadline"] = None
-            insert_data["manager_id"] = manager_id
+            insert_data["manager_id"] = current_employee.get("employee_id") or current_employee.get("id")
             insert_columns = list(insert_data)
             placeholders = ", ".join(["%s"] * len(insert_columns))
             cur.execute(
@@ -1433,20 +1888,30 @@ def save_project(payload: ProjectSaveRequest, user=Depends(get_current_user)):
             cur.execute("DELETE FROM task WHERE project_id = %s", (project_id,))
 
             name_to_task_id = {}
+            task_assignments: List[tuple[str, int]] = []
+            employee_task_columns = _get_table_columns(cur, "employee_task")
+            employee_task_employee_col = _get_employee_link_column(employee_task_columns)
             for task in payload.tasks:
                 task_deadline = _compute_task_deadline(
                     project_start, task.start_days_from_kickoff, task.duration_days
                 )
                 estimated_hours = max(1.0, float(task.duration_days) * TASK_HOURS_PER_DAY)
+                normalized_status = _normalize_task_status(task.status or "Not Started")
+                task_progress = _normalize_task_progress(task.progress, normalized_status)
+                assignee_ids = _extract_task_assignee_ids(task)
+                primary_assignee = assignee_ids[0] if assignee_ids else None
                 task_data = {
                     "project_id": project_id,
-                    "emp_id": None,
-                    "owner_employee_id": None,
+                    "emp_id": primary_assignee,
+                    "owner_employee_id": primary_assignee,
                     task_name_col: task.name,
                     "description": (task.description or "").strip() or None,
-                    "status": "Not Started",
+                    "status": normalized_status,
+                    "progress_percent": task_progress,
                     "estimated_hours": estimated_hours,
                     "priority": "Medium",
+                    "category": (task.category or task.tag or "").strip() or None,
+                    "tag": (task.tag or task.category or "").strip() or None,
                     "deadline": task_deadline,
                     "start_date": (
                         project_start + timedelta(days=max(0, int(task.start_days_from_kickoff or 0)))
@@ -1469,11 +1934,28 @@ def save_project(payload: ProjectSaveRequest, user=Depends(get_current_user)):
                     )
                     inserted_id = cur.fetchone()[0]
                     name_to_task_id[task.name] = inserted_id
+                    if employee_task_employee_col:
+                        for assignee_id in assignee_ids:
+                            task_assignments.append((assignee_id, int(inserted_id)))
                 else:
                     cur.execute(
                         f"INSERT INTO task ({column_list}) VALUES ({placeholders})",
                         values,
                     )
+
+            if (
+                task_assignments
+                and "task_id" in employee_task_columns
+                and employee_task_employee_col
+            ):
+                cur.executemany(
+                    f"""
+                    INSERT INTO employee_task ({employee_task_employee_col}, task_id)
+                    VALUES (%s, %s)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    task_assignments,
+                )
 
             if name_to_task_id:
                 task_dependency_columns = task_dependency_columns or _get_table_columns(
@@ -1586,8 +2068,7 @@ def save_project(payload: ProjectSaveRequest, user=Depends(get_current_user)):
 
 @router.post("/start")
 def start_project(payload: ProjectStartRequest, user=Depends(get_current_user)):
-    manager_id = user.get("id")
-    if not manager_id:
+    if not user.get("id"):
         raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
 
     conn = get_connection()
@@ -1599,6 +2080,8 @@ def start_project(payload: ProjectStartRequest, user=Depends(get_current_user)):
     deadline = start_time + timedelta(days=payload.duration_days)
 
     try:
+        current_employee = fetch_current_employee(cur, user)
+        ensure_project_management_access(cur, current_employee, payload.project_id)
         project_columns = _get_table_columns(cur, "project")
         if "manager_id" not in project_columns:
             raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
@@ -1616,10 +2099,10 @@ def start_project(payload: ProjectStartRequest, user=Depends(get_current_user)):
             f"""
             UPDATE project
             SET {set_clause}
-            WHERE project_id = %s AND manager_id::text = %s
+            WHERE project_id = %s
             RETURNING {_project_select_clause(project_columns)}
             """,
-            list(update_data.values()) + [payload.project_id, str(manager_id)],
+            list(update_data.values()) + [payload.project_id],
         )
         row = cur.fetchone()
         if not row:
@@ -1654,10 +2137,8 @@ def update_task_status(
     payload: TaskStatusUpdateRequest,
     user=Depends(get_current_user),
 ):
-    user_id = user.get("id")
-    if not user_id:
+    if not user.get("id"):
         raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
-    user_id = str(user_id)
     next_status = _normalize_task_status(payload.status)
 
     conn = get_connection()
@@ -1666,47 +2147,29 @@ def update_task_status(
     cur = conn.cursor()
 
     try:
+        current_employee = fetch_current_employee(cur, user)
+        ensure_task_move_access(cur, current_employee, task_id)
+        user_id = str(current_employee.get("employee_id") or current_employee.get("id") or "")
         task_columns = _get_table_columns(cur, "task")
         if "task_id" not in task_columns or "status" not in task_columns:
             raise HTTPException(status_code=400, detail="Task status is not supported by the current schema.")
-
-        employee_task_columns = _get_table_columns(cur, "employee_task")
-        employee_task_employee_col = _get_employee_link_column(employee_task_columns)
-        join_employee_task = (
-            "task_id" in employee_task_columns and employee_task_employee_col
-        )
-        access_parts = ["p.manager_id::text = %s"]
-        access_params: List[Any] = [user_id]
-        if "owner_employee_id" in task_columns:
-            access_parts.append("t.owner_employee_id::text = %s")
-            access_params.append(user_id)
-        if join_employee_task:
-            access_parts.append(f"et.{employee_task_employee_col}::text = %s")
-            access_params.append(user_id)
-
-        employee_task_join = (
-            "LEFT JOIN employee_task et ON et.task_id = t.task_id"
-            if join_employee_task
-            else ""
-        )
         cur.execute(
             f"""
-            SELECT DISTINCT t.project_id
+            SELECT t.project_id
             FROM task t
-            JOIN project p ON p.project_id = t.project_id
-            {employee_task_join}
             WHERE t.task_id = %s
-              AND ({" OR ".join(access_parts)})
             LIMIT 1
             """,
-            [task_id] + access_params,
+            (task_id,),
         )
-        ownership_row = cur.fetchone()
-        if not ownership_row:
+        project_row = cur.fetchone()
+        if not project_row:
             raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
-        project_id = int(ownership_row[0])
+        project_id = int(project_row[0])
 
         update_data: Dict[str, Any] = {"status": next_status}
+        if "progress_percent" in task_columns:
+            update_data["progress_percent"] = _task_status_progress_hint(next_status)
         if "status_updated_by" in task_columns:
             update_data["status_updated_by"] = user_id
         elif "status_changed_by" in task_columns:
@@ -1791,7 +2254,18 @@ def update_task_status(
 
 
 @router.post("/build-team")
-def build_team(payload: TeamBuildRequest):
+def build_team(payload: TeamBuildRequest, user=Depends(get_current_user)):
+    conn = get_connection()
+    if conn is None:
+        raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
+    cur = conn.cursor()
+    try:
+        current_employee = fetch_current_employee(cur, user)
+        ensure_project_management_access(cur, current_employee)
+    finally:
+        cur.close()
+        release_connection(conn)
+
     project_name = payload.project_name.strip()
     if not project_name:
         raise HTTPException(status_code=400, detail="Project name is required.")
@@ -1827,8 +2301,7 @@ def build_team(payload: TeamBuildRequest):
 
 @router.post("/save-team")
 def save_team(payload: TeamSaveRequest, user=Depends(get_current_user)):
-    manager_id = user.get("id")
-    if not manager_id:
+    if not user.get("id"):
         raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
 
     conn = get_connection()
@@ -1837,6 +2310,8 @@ def save_team(payload: TeamSaveRequest, user=Depends(get_current_user)):
     cur = conn.cursor()
 
     try:
+        current_employee = fetch_current_employee(cur, user)
+        ensure_project_management_access(cur, current_employee, payload.project_id)
         project_columns = _get_table_columns(cur, "project")
         project_name_col = _get_project_name_column(project_columns)
         if not project_name_col:
@@ -1845,9 +2320,9 @@ def save_team(payload: TeamSaveRequest, user=Depends(get_current_user)):
             f"""
             SELECT project_id, {project_name_col} AS name
             FROM project
-            WHERE project_id = %s AND manager_id::text = %s
+            WHERE project_id = %s
             """,
-            (payload.project_id, str(manager_id)),
+            (payload.project_id,),
         )
         project_row = cur.fetchone()
         if not project_row:
@@ -2026,8 +2501,7 @@ def save_team(payload: TeamSaveRequest, user=Depends(get_current_user)):
 def send_learning_paths(
     payload: SendLearningPathsRequest, user=Depends(get_current_user)
 ):
-    manager_id = user.get("id")
-    if not manager_id:
+    if not user.get("id"):
         raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
 
     if not payload.team:
@@ -2043,6 +2517,8 @@ def send_learning_paths(
     cur = conn.cursor()
 
     try:
+        current_employee = fetch_current_employee(cur, user)
+        ensure_project_management_access(cur, current_employee)
         result = _send_generated_learning_paths(cur, employees)
         conn.commit()
         return result
@@ -2092,25 +2568,22 @@ def list_my_notifications(user=Depends(get_current_user)):
 
 @router.post("/alerts/run")
 def run_my_alerts(payload: AlertRunRequest, user=Depends(get_current_user)):
-    manager_id = user.get("id")
-    if not manager_id:
+    if not user.get("id"):
         raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED"})
 
+    conn = get_connection()
+    if conn is None:
+        raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
+    cur = conn.cursor()
+    try:
+        current_employee = fetch_current_employee(cur, user)
+        ensure_project_management_access(cur, current_employee, payload.project_id)
+    finally:
+        cur.close()
+        release_connection(conn)
+
     if payload.project_id is not None:
-        conn = get_connection()
-        if conn is None:
-            raise HTTPException(status_code=500, detail={"code": "SERVER_ERROR"})
-        cur = conn.cursor()
-        try:
-            cur.execute(
-                "SELECT project_id FROM project WHERE project_id = %s AND manager_id::text = %s",
-                (payload.project_id, str(manager_id)),
-            )
-            if not cur.fetchone():
-                raise HTTPException(status_code=404, detail={"code": "NOT_FOUND"})
-        finally:
-            cur.close()
-            release_connection(conn)
+        pass
 
     try:
         return run_deadline_alert_agent(

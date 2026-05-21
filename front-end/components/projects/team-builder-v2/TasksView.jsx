@@ -8,6 +8,7 @@ export default function TasksView({
   tasks,
   members,
   membersById,
+  readOnly = false,
   scoreToPercent,
   getProgressTone,
   formatDayRange,
@@ -164,34 +165,38 @@ export default function TasksView({
                           </span>
                         )}
                       </span>
-                      <button
-                        type="button"
-                        className="tb2-add-member-btn tb-interactive"
-                        title="Add member"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setMembersAnchor(event.currentTarget);
-                          setPopoverTaskName(task.name);
-                        }}
-                      >
-                        <Plus size={14} />
-                      </button>
+                      {!readOnly ? (
+                        <button
+                          type="button"
+                          className="tb2-add-member-btn tb-interactive"
+                          title="Add member"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setMembersAnchor(event.currentTarget);
+                            setPopoverTaskName(task.name);
+                          }}
+                        >
+                          <Plus size={14} />
+                        </button>
+                      ) : null}
                     </>
                   ) : (
                     <div className="tb2-add-members-inline">
                       <span className="tb2-no-members">No members</span>
-                      <button
-                        type="button"
-                        className="tb2-add-members-btn tb-interactive"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setMembersAnchor(event.currentTarget);
-                          setPopoverTaskName(task.name);
-                        }}
-                      >
-                        <Plus size={14} />
-                        <span>Add members</span>
-                      </button>
+                      {!readOnly ? (
+                        <button
+                          type="button"
+                          className="tb2-add-members-btn tb-interactive"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setMembersAnchor(event.currentTarget);
+                            setPopoverTaskName(task.name);
+                          }}
+                        >
+                          <Plus size={14} />
+                          <span>Add members</span>
+                        </button>
+                      ) : null}
                     </div>
                   )}
                 </span>
@@ -213,24 +218,26 @@ export default function TasksView({
         </div>
       </div>
 
-      <MembersPopover
-        anchorEl={membersAnchor}
-        isOpen={Boolean(popoverTask)}
-        onClose={() => setPopoverTaskName(null)}
-        projectMembers={members}
-        assignedMemberIds={new Set(popoverTask?.memberIds || [])}
-        memberDetails={assignedDetails}
-        onAddMember={(memberId) => {
-          if (!popoverTask) return;
-          onAssignmentUpdate?.(popoverTask.primaryAssignmentId, memberId);
-        }}
-        onRemoveMember={(memberId) => {
-          const detail = assignedDetails.get(memberId);
-          if (detail?.id) {
-            onUnassignAssignment?.(detail.id);
-          }
-        }}
-      />
+      {!readOnly ? (
+        <MembersPopover
+          anchorEl={membersAnchor}
+          isOpen={Boolean(popoverTask)}
+          onClose={() => setPopoverTaskName(null)}
+          projectMembers={members}
+          assignedMemberIds={new Set(popoverTask?.memberIds || [])}
+          memberDetails={assignedDetails}
+          onAddMember={(memberId) => {
+            if (!popoverTask) return;
+            onAssignmentUpdate?.(popoverTask.primaryAssignmentId, memberId);
+          }}
+          onRemoveMember={(memberId) => {
+            const detail = assignedDetails.get(memberId);
+            if (detail?.id) {
+              onUnassignAssignment?.(detail.id);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

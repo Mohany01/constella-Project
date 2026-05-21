@@ -56,6 +56,16 @@ const sanitizeTasksForSave = (tasks) =>
     ({
       name,
       description,
+      status,
+      category,
+      tag,
+      progress,
+      assignedTo,
+      assigned_to,
+      assigneeIds,
+      memberIds,
+      assignees,
+      members,
       depends_on,
       skills,
       start_days_from_kickoff,
@@ -63,6 +73,16 @@ const sanitizeTasksForSave = (tasks) =>
     }) => ({
       name,
       description,
+      status,
+      category,
+      tag,
+      progress,
+      assignedTo,
+      assigned_to,
+      assigneeIds,
+      memberIds,
+      assignees,
+      members,
       depends_on,
       skills,
       start_days_from_kickoff,
@@ -90,6 +110,7 @@ export default function GeneratedTasksModal({
   onSave,
   analysis,
   isSaved = false,
+  readOnly = false,
 }) {
   const [tasks, setTasks] = useState([]);
   const [originalTasks, setOriginalTasks] = useState([]);
@@ -184,6 +205,10 @@ export default function GeneratedTasksModal({
   }, [analysis, open]);
 
   const handleCloseRequest = () => {
+    if (readOnly) {
+      onClose?.();
+      return;
+    }
     if (isSaving) return;
     if (!showSaveButton) {
       onClose?.();
@@ -357,7 +382,7 @@ export default function GeneratedTasksModal({
     });
   };
 
-  const showAlert = (nextAlert) => {
+  function showAlert(nextAlert) {
     if (alertTimeoutRef.current) {
       clearTimeout(alertTimeoutRef.current);
       alertTimeoutRef.current = null;
@@ -369,7 +394,7 @@ export default function GeneratedTasksModal({
         alertTimeoutRef.current = null;
       }, 2600);
     }
-  };
+  }
 
   useEffect(() => {
     return () => {
@@ -474,19 +499,23 @@ export default function GeneratedTasksModal({
               </span>
             </div>
             <p className="planner-subtitle">
-              Review and edit tasks before saving to your project.
+              {readOnly
+                ? "Review project tasks and delivery flow."
+                : "Review and edit tasks before saving to your project."}
             </p>
           </div>
           <div className="planner-actions">
-            <button
-              className="ws-btn ws-btn-ghost"
-              type="button"
-              onClick={handleResetToAgent}
-              disabled={!originalTasks.length}
-            >
-              Reset to agent
-            </button>
-            {showSaveButton && (
+            {!readOnly ? (
+              <button
+                className="ws-btn ws-btn-ghost"
+                type="button"
+                onClick={handleResetToAgent}
+                disabled={!originalTasks.length}
+              >
+                Reset to agent
+              </button>
+            ) : null}
+            {!readOnly && showSaveButton ? (
               <button
                 className="ws-btn ws-btn-primary"
                 type="button"
@@ -495,7 +524,7 @@ export default function GeneratedTasksModal({
               >
                 {isSaving ? "Saving..." : "Save tasks"}
               </button>
-            )}
+            ) : null}
             <button
               className="ws-modal-close"
               type="button"
@@ -576,6 +605,7 @@ export default function GeneratedTasksModal({
               tasks={scheduledTasks}
               conflictIds={conflictIds}
               allTasks={scheduledTasks}
+              readOnly={readOnly}
               onRename={handleRename}
               onStartChange={handleStartChange}
               onEndChange={handleEndChange}
@@ -587,13 +617,15 @@ export default function GeneratedTasksModal({
               onDependencyHover={setHoveredDependency}
               onReorder={handleReorder}
             />
-            <button
-              className="task-add-button"
-              type="button"
-              onClick={handleAddTask}
-            >
-              + Add task
-            </button>
+            {!readOnly ? (
+              <button
+                className="task-add-button"
+                type="button"
+                onClick={handleAddTask}
+              >
+                + Add task
+              </button>
+            ) : null}
           </section>
 
           <aside className="timeline-panel">

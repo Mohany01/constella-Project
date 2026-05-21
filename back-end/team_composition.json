@@ -1,25 +1,6 @@
 {
   "team": [
     {
-      "employee_id": "72d414e4-2a5f-4111-a6af-2af0b15a92ca",
-      "employee_email": "bayan.haitham@constella.com",
-      "employee_filename": "Bayan Haitham",
-      "assignments": [
-        {
-          "task_name": "Data Preprocessing",
-          "start_day": 3,
-          "end_day": 5,
-          "skills_match": [
-            "numpy",
-            "python",
-            "pandas"
-          ],
-          "missing_skills": [],
-          "semantic_match_score": 0.6913580894470215
-        }
-      ]
-    },
-    {
       "employee_id": "52af80e9-c966-4517-9adc-d82c9bf785fa",
       "employee_email": "maryam.galal@constella.com",
       "employee_filename": "Maryam Galal",
@@ -34,10 +15,10 @@
           "missing_skills": [
             "model selection"
           ],
-          "semantic_match_score": 0.6077526211738586
+          "semantic_match_score": 0.6077526807785034
         },
         {
-          "task_name": "Model Implementation and Training",
+          "task_name": "Model Implementation",
           "start_day": 6,
           "end_day": 10,
           "skills_match": [
@@ -47,18 +28,18 @@
             "pytorch",
             "tensorflow"
           ],
-          "semantic_match_score": 0.6154202818870544
+          "semantic_match_score": 0.6154202222824097
         },
         {
-          "task_name": "Model Optimization",
-          "start_day": 12,
-          "end_day": 14,
+          "task_name": "Model Regularization",
+          "start_day": 10,
+          "end_day": 12,
           "skills_match": [],
           "missing_skills": [
-            "hyperparameter tuning",
-            "neural network optimization"
+            "regularization techniques",
+            "hyperparameter tuning"
           ],
-          "semantic_match_score": 0.27124541997909546
+          "semantic_match_score": 0.3340133726596832
         }
       ]
     },
@@ -68,16 +49,27 @@
       "employee_filename": "Muhammed Hany",
       "assignments": [
         {
-          "task_name": "Dataset Description and Objective",
+          "task_name": "Dataset Description",
           "start_day": 2,
           "end_day": 3,
           "skills_match": [
-            "data analysis"
+            "data analysis",
+            "writing"
           ],
-          "missing_skills": [
-            "project planning"
+          "missing_skills": [],
+          "semantic_match_score": 0.775057315826416
+        },
+        {
+          "task_name": "Data Preprocessing",
+          "start_day": 3,
+          "end_day": 5,
+          "skills_match": [
+            "python",
+            "numpy",
+            "pandas"
           ],
-          "semantic_match_score": 0.7020787000656128
+          "missing_skills": [],
+          "semantic_match_score": 0.6913579106330872
         }
       ]
     },
@@ -96,34 +88,34 @@
           "missing_skills": [
             "kaggle"
           ],
-          "semantic_match_score": 0.38742199540138245
+          "semantic_match_score": 0.3874219059944153
         },
         {
-          "task_name": "Model Regularization and Evaluation",
-          "start_day": 10,
-          "end_day": 12,
+          "task_name": "Model Evaluation",
+          "start_day": 12,
+          "end_day": 14,
           "skills_match": [
             "model evaluation"
           ],
           "missing_skills": [
-            "regularization techniques"
+            "neural network architecture"
           ],
-          "semantic_match_score": 0.4501305818557739
+          "semantic_match_score": 0.44142764806747437
         },
         {
-          "task_name": "Project Presentation Preparation",
+          "task_name": "Project Presentation",
           "start_day": 14,
           "end_day": 15,
           "skills_match": [
-            "powerpoint",
-            "presentation skills"
+            "presentation",
+            "communication"
           ],
           "missing_skills": [],
-          "semantic_match_score": 0.7534642815589905
+          "semantic_match_score": 0.6019188165664673
         }
       ]
     }
   ],
   "unassigned_tasks": [],
-  "rationale": "Requested a team of 5. Formed a team of 4 based on semantic skill matching and availability. 0 tasks could not be assigned."
+  "rationale": "Requested a team of 5. Formed a team of 3 based on semantic skill matching and availability. 0 tasks could not be assigned."
 }

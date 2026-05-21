@@ -1,4 +1,5 @@
 import { safeLocalStorageSet } from "./storage";
+import { SESSION_COOKIE_NAME } from "./auth";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -131,6 +132,8 @@ export async function apiClient(url, options = {}) {
       } catch {
         if (typeof window !== "undefined") {
           localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          document.cookie = `${SESSION_COOKIE_NAME}=; Max-Age=0; path=/; SameSite=Lax`;
           window.location.href = "/login";
         }
         throw new Error("Please sign in again.");
@@ -142,7 +145,7 @@ export async function apiClient(url, options = {}) {
 
   if (res.status === 403) {
     logDebugId(data, res.status);
-    throw new Error("Please sign in again.");
+    throw new Error(getApiErrorMessage(data, res.status));
   }
 
   if (!res.ok) {

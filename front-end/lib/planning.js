@@ -19,6 +19,16 @@ export const normalizeTasks = (agentJson = []) => {
       ? task.name.trim()
       : `Task ${index + 1}`,
     description: typeof task?.description === "string" ? task.description : "",
+    status: typeof task?.status === "string" ? task.status : "todo",
+    category: typeof task?.category === "string" ? task.category : "",
+    tag: typeof task?.tag === "string" ? task.tag : "",
+    progress: toNumber(task?.progress, 0),
+    assignedTo: task?.assignedTo ?? task?.assigned_to ?? null,
+    assigned_to: task?.assigned_to ?? task?.assignedTo ?? null,
+    assigneeIds: Array.isArray(task?.assigneeIds) ? task.assigneeIds : [],
+    memberIds: Array.isArray(task?.memberIds) ? task.memberIds : [],
+    assignees: Array.isArray(task?.assignees) ? task.assignees : [],
+    members: Array.isArray(task?.members) ? task.members : [],
     depends_on: Array.isArray(task?.depends_on)
       ? task.depends_on.filter(Boolean)
       : [],

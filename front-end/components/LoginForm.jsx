@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiClient } from "../lib/apiClient";
+import { persistUserSession, syncCurrentUserProfile } from "../lib/auth-client";
 import { safeLocalStorageSet } from "../lib/storage";
 
 export default function LoginForm({ className = "" }) {
@@ -61,11 +62,20 @@ export default function LoginForm({ className = "" }) {
 
       if (typeof window !== "undefined") {
         safeLocalStorageSet("token", data.token);
-        safeLocalStorageSet(
-          "user",
-          JSON.stringify({ id: data.id, name: data.name, email: data.email })
-        );
+        persistUserSession({
+          id: data.id,
+          name: data.name,
+          email: data.email,
+          role: data.role,
+        });
       }
+
+      await syncCurrentUserProfile({
+        id: data.id,
+        name: data.name,
+        email: data.email,
+        role: data.role,
+      });
 
       setMessage(`Welcome back, ${data.name} 👋`);
       router.push("/dashboard");

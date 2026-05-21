@@ -7,6 +7,11 @@ import {
   ProjectAnalysisModal,
   ProjectAnalyzerModal,
 } from "./ProjectAnalyzerModal";
+import { useSessionUser } from "../../lib/auth-client";
+import {
+  canManageProjects,
+  filterProjectsByAccess,
+} from "../../lib/permissions";
 
 const TeamBuilderModal = dynamic(() => import("./TeamBuilderModal"), {
   ssr: false,
@@ -68,6 +73,16 @@ const mapDbTaskToAnalysis = (task) => {
   return {
     name: task.name?.trim() || "Untitled task",
     description: task.description || "",
+    status: task.status || "todo",
+    category: task.category || "",
+    tag: task.tag || "",
+    progress: task.progress ?? 0,
+    assignedTo: task.assignedTo ?? task.assigned_to ?? null,
+    assigned_to: task.assigned_to ?? task.assignedTo ?? null,
+    assigneeIds: Array.isArray(task.assigneeIds) ? task.assigneeIds : [],
+    memberIds: Array.isArray(task.memberIds) ? task.memberIds : [],
+    assignees: Array.isArray(task.assignees) ? task.assignees : [],
+    members: Array.isArray(task.members) ? task.members : [],
     depends_on: Array.isArray(task.depends_on)
       ? task.depends_on.filter(Boolean)
       : [],
@@ -124,6 +139,7 @@ const mapDbProjectToCard = (project) => {
 };
 
 export default function ProjectsMain() {
+  const { user, isLoading: isUserLoading } = useSessionUser({ requireAuth: true });
   const [projects, setProjects] = useState(INITIAL_PROJECTS);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -137,6 +153,11 @@ export default function ProjectsMain() {
   const progressDots = useMemo(() => Array.from({ length: 10 }), []);
   const loadingIntervalRef = useRef(null);
   const loadingTimeoutRef = useRef(null);
+  const isManager = canManageProjects(user);
+
+  const blockManagerAction = (message) => {
+    setActionError(message || "Only project managers can perform this action.");
+  };
 
   const applyProjectDetails = (projectId, details) => {
     if (!details) return;
@@ -150,6 +171,8 @@ export default function ProjectsMain() {
   };
 
   useEffect(() => {
+    if (!user) return undefined;
+
     let isMounted = true;
     setIsLoading(true);
     setLoadingProgress(0);
@@ -172,7 +195,7 @@ export default function ProjectsMain() {
         const data = await apiClient("/projects", { method: "GET" });
         const items = Array.isArray(data?.projects) ? data.projects : [];
         if (!isMounted) return;
-        setProjects(items.map(mapDbProjectToCard));
+        setProjects(filterProjectsByAccess(user, items).map(mapDbProjectToCard));
       } catch (err) {
         if (!isMounted) return;
         setActionError(err?.message || "Unable to load projects.");
@@ -203,9 +226,13 @@ export default function ProjectsMain() {
         loadingTimeoutRef.current = null;
       }
     };
-  }, []);
+  }, [user]);
 
   const handleAnalysisComplete = (payload) => {
+    if (!isManager) {
+      blockManagerAction();
+      return;
+    }
     const projectName = payload?.project_name?.trim() || "New project";
     const projectDescription = payload?.description?.trim() || "";
     const projectId = Date.now();
@@ -285,12 +312,23 @@ export default function ProjectsMain() {
   };
 
   const handleOpenTeamBuilder = (projectId) => {
+    const target = projects.find((project) => project.id === projectId);
+    const hasTeam = Boolean(
+      target?.team?.team?.length || target?.team?.unassigned_tasks?.length
+    );
+    if (!isManager && !hasTeam) {
+      blockManagerAction("Only project managers can build or change teams.");
+      return;
+    }
     setActiveTeamProjectId(projectId);
     setIsTeamOpen(true);
     refreshProjectTeam(projectId);
   };
 
   const handleSaveTeam = async (updatedTeam) => {
+    if (!isManager) {
+      throw new Error("Only project managers can save teams.");
+    }
     if (!activeTeamProjectId) return;
     const target = projects.find((project) => project.id === activeTeamProjectId);
     if (!target?.dbId) {
@@ -326,6 +364,9 @@ export default function ProjectsMain() {
   };
 
   const handleSaveProject = async (updated) => {
+    if (!isManager) {
+      throw new Error("Only project managers can edit projects.");
+    }
     if (!activeProjectId) return;
     const target = projects.find((project) => project.id === activeProjectId);
     if (!target) return;
@@ -367,6 +408,10 @@ export default function ProjectsMain() {
   };
 
   const handleStartProject = async (projectId) => {
+    if (!isManager) {
+      blockManagerAction();
+      return;
+    }
     const target = projects.find((project) => project.id === projectId);
     if (!target?.dbId) {
       setActionError("Save the project before starting it.");
@@ -412,22 +457,26 @@ export default function ProjectsMain() {
               Manage projects smarter with AI-powered planning.
             </h1>
             <p className="ws-subtitle">
-              Create new initiatives, upload briefs, and generate task plans in seconds.
+              {isManager
+                ? "Create new initiatives, upload briefs, and generate task plans in seconds."
+                : "View the projects you are assigned to and follow their current delivery plan."}
             </p>
           </div>
-          <div className="ws-actions">
-            <button className="ws-btn ws-btn-ghost">
-              <FileUp size={16} />
-              Import
-            </button>
-            <button
-              className="ws-btn ws-btn-primary"
-              onClick={() => setIsCreateOpen(true)}
-            >
-              <Plus size={16} />
-              New project
-            </button>
-          </div>
+          {isManager ? (
+            <div className="ws-actions">
+              <button className="ws-btn ws-btn-ghost">
+                <FileUp size={16} />
+                Import
+              </button>
+              <button
+                className="ws-btn ws-btn-primary"
+                onClick={() => setIsCreateOpen(true)}
+              >
+                <Plus size={16} />
+                New project
+              </button>
+            </div>
+          ) : null}
         </header>
 
         <section className="ws-panel">
@@ -441,7 +490,7 @@ export default function ProjectsMain() {
           {actionError && <p className="ws-error">{actionError}</p>}
 
           <div className="ws-card-grid">
-            {isLoading ? (
+            {isLoading || isUserLoading ? (
               <div className="ws-loading">
                 <div className="ws-loading-card" role="status" aria-live="polite">
                   <div className="ws-loading-head">
@@ -460,7 +509,11 @@ export default function ProjectsMain() {
                 </div>
               </div>
             ) : projects.length === 0 ? (
-              <div className="ws-empty">No projects yet. Create one to get started.</div>
+              <div className="ws-empty">
+                {isManager
+                  ? "No projects yet. Create one to get started."
+                  : "No assigned projects yet."}
+              </div>
             ) : (
               projects.map((project) => {
                 const canBuildTeam =
@@ -510,67 +563,85 @@ export default function ProjectsMain() {
                     <span>{project.progress}%</span>
                   </div>
                   <div className="ws-project-actions">
-                    <button
-                      type="button"
-                      className="ws-btn ws-project-action-btn is-start"
-                      disabled={!project.dbId}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleStartProject(project.id);
-                      }}
-                      onKeyDown={(event) => event.stopPropagation()}
-                      title={
-                        project.dbId ? "Start project" : "Save the project first"
-                      }
-                    >
-                      Start project
-                    </button>
-                    {hasTeam ? (
+                    {isManager ? (
                       <>
                         <button
                           type="button"
-                          className="ws-btn ws-project-action-btn is-success"
-                          disabled
-                          title="Team already built"
-                        >
-                          Team built
-                        </button>
-                        <button
-                          type="button"
-                          className="ws-btn ws-btn-ghost ws-project-action-btn"
+                          className="ws-btn ws-project-action-btn is-start"
+                          disabled={!project.dbId}
                           onClick={(event) => {
                             event.stopPropagation();
-                            handleOpenTeamBuilder(project.id);
+                            handleStartProject(project.id);
                           }}
                           onKeyDown={(event) => event.stopPropagation()}
-                          title="View team"
+                          title={
+                            project.dbId ? "Start project" : "Save the project first"
+                          }
                         >
-                          <Users size={16} />
-                          View team
+                          Start project
                         </button>
+                        {hasTeam ? (
+                          <>
+                            <button
+                              type="button"
+                              className="ws-btn ws-project-action-btn is-success"
+                              disabled
+                              title="Team already built"
+                            >
+                              Team built
+                            </button>
+                            <button
+                              type="button"
+                              className="ws-btn ws-btn-ghost ws-project-action-btn"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleOpenTeamBuilder(project.id);
+                              }}
+                              onKeyDown={(event) => event.stopPropagation()}
+                              title="View team"
+                            >
+                              <Users size={16} />
+                              View team
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            className="ws-btn ws-btn-ghost ws-project-action-btn"
+                            disabled={!canBuildTeam}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleOpenTeamBuilder(project.id);
+                            }}
+                            onKeyDown={(event) => event.stopPropagation()}
+                            title={
+                              canBuildTeam
+                                ? "Build a team for this project"
+                                : "Run project analysis first"
+                            }
+                          >
+                            <Users size={16} />
+                            Build team
+                          </button>
+                        )}
                       </>
-                    ) : (
+                    ) : hasTeam ? (
                       <button
                         type="button"
                         className="ws-btn ws-btn-ghost ws-project-action-btn"
-                        disabled={!canBuildTeam}
                         onClick={(event) => {
                           event.stopPropagation();
                           handleOpenTeamBuilder(project.id);
                         }}
                         onKeyDown={(event) => event.stopPropagation()}
-                        title={
-                          canBuildTeam
-                            ? "Build a team for this project"
-                            : "Run project analysis first"
-                        }
+                        title="View project team"
                       >
                         <Users size={16} />
-                        Build team
+                        View team
                       </button>
-                    )}
+                    ) : null}
                     <div className="ws-project-cta">
-                      <span>Open timeline</span>
+                      <span>{isManager ? "Open timeline" : "View details"}</span>
                       <ChevronRight size={16} />
                     </div>
                   </div>
@@ -582,11 +653,13 @@ export default function ProjectsMain() {
         </section>
       </div>
 
-      <ProjectAnalyzerModal
-        open={isCreateOpen}
-        onClose={() => setIsCreateOpen(false)}
-        onComplete={handleAnalysisComplete}
-      />
+      {isManager ? (
+        <ProjectAnalyzerModal
+          open={isCreateOpen}
+          onClose={() => setIsCreateOpen(false)}
+          onComplete={handleAnalysisComplete}
+        />
+      ) : null}
       <ProjectAnalysisModal
         open={isPlannerOpen}
         onClose={(payload) => {
@@ -605,12 +678,14 @@ export default function ProjectsMain() {
         analysis={activeProject?.analysis}
         onSave={handleSaveProject}
         isSaved={Boolean(activeProject?.dbId)}
+        readOnly={!isManager}
       />
       <TeamBuilderModal
         open={isTeamOpen}
         onClose={() => setIsTeamOpen(false)}
         project={activeTeamProject}
         onSave={handleSaveTeam}
+        readOnly={!isManager}
       />
     </>
   );

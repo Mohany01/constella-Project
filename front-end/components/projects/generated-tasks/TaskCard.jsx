@@ -17,6 +17,7 @@ export default function TaskCard({
   draggedId,
   dragOverId,
   draggedDisabled,
+  readOnly = false,
   onRename,
   onStartChange,
   onEndChange,
@@ -135,6 +136,7 @@ export default function TaskCard({
   const toggleExpanded = () => setIsExpanded((prev) => !prev);
 
   const handleDependencyDrop = (event) => {
+    if (readOnly) return;
     event.preventDefault();
     event.stopPropagation();
     setIsDepDrop(false);
@@ -176,12 +178,17 @@ export default function TaskCard({
               onChange={(event) => setDraftName(event.target.value)}
               onKeyDown={handleNameKeyDown}
               onBlur={handleCommitName}
+              disabled={readOnly}
             />
           ) : (
             <button
               type="button"
               className="task-name"
-              onClick={() => setIsEditing(true)}
+              onClick={() => {
+                if (!readOnly) {
+                  setIsEditing(true);
+                }
+              }}
             >
               {task.name}
             </button>
@@ -196,6 +203,7 @@ export default function TaskCard({
               min="0"
               value={start}
               onChange={(event) => onStartChange?.(task.id, event.target.value)}
+              disabled={readOnly}
             />
           </label>
           <label className="task-range-field">
@@ -207,6 +215,7 @@ export default function TaskCard({
               onChange={(event) =>
                 onEndChange?.(task.id, event.target.value, start)
               }
+              disabled={readOnly}
             />
           </label>
         </div>
@@ -227,6 +236,7 @@ export default function TaskCard({
           className={`task-meta-deps${isDepDrop ? " is-drop" : ""}`}
           onMouseLeave={() => onDependencyHover?.(null)}
           onDragOver={(event) => {
+            if (readOnly) return;
             event.preventDefault();
             event.stopPropagation();
             setIsDepDrop(true);
@@ -290,7 +300,7 @@ export default function TaskCard({
           <span>More</span>
         </button>
 
-        {onDelete && (
+        {!readOnly && onDelete ? (
           <button
             type="button"
             className="task-delete-icon"
@@ -299,7 +309,7 @@ export default function TaskCard({
           >
             <Trash2 size={16} />
           </button>
-        )}
+        ) : null}
       </div>
 
       <div className={`task-card-details${isExpanded ? " is-expanded" : ""}`}>
@@ -313,6 +323,7 @@ export default function TaskCard({
               onChange={(event) =>
                 onDescriptionChange?.(task.id, event.target.value)
               }
+              disabled={readOnly}
             />
           </label>
 
@@ -327,6 +338,7 @@ export default function TaskCard({
                   type="checkbox"
                   checked={noDepsChecked}
                   onChange={() => onDependenciesChange?.(task.id, [])}
+                  disabled={readOnly}
                 />
                 <span>No dependencies</span>
               </label>
@@ -343,6 +355,7 @@ export default function TaskCard({
                     type="checkbox"
                     checked={(task.depends_on || []).includes(dep.name)}
                     onChange={() => toggleDependency(dep.name)}
+                    disabled={readOnly}
                   />
                   <span>{dep.name}</span>
                 </label>
@@ -360,18 +373,21 @@ export default function TaskCard({
                     type="button"
                     onClick={() => handleSkillRemove(skill)}
                     aria-label={`Remove ${skill}`}
+                    disabled={readOnly}
                   >
                     <X size={12} />
                   </button>
                 </span>
               ))}
-              <input
-                value={skillDraft}
-                placeholder="+ Add skill"
-                onChange={(event) => setSkillDraft(event.target.value)}
-                onKeyDown={handleSkillKeyDown}
-                onBlur={handleSkillCommit}
-              />
+              {!readOnly ? (
+                <input
+                  value={skillDraft}
+                  placeholder="+ Add skill"
+                  onChange={(event) => setSkillDraft(event.target.value)}
+                  onKeyDown={handleSkillKeyDown}
+                  onBlur={handleSkillCommit}
+                />
+              ) : null}
             </div>
           </div>
         </div>

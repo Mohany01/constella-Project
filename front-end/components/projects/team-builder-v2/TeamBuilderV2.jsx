@@ -152,6 +152,7 @@ const buildTaskItems = (data, analysisTasks = []) => {
 export default function TeamBuilderV2({
   data,
   analysisTasks = [],
+  readOnly = false,
   onAssignmentUpdate,
   onUnassignAssignment,
 }) {
@@ -282,6 +283,7 @@ export default function TeamBuilderV2({
             tasks={taskItems}
             members={members}
             membersById={membersById}
+            readOnly={readOnly}
             scoreToPercent={scoreToPercent}
             getProgressTone={getProgressTone}
             formatDayRange={formatDayRange}
@@ -310,6 +312,7 @@ export default function TeamBuilderV2({
         member={selectedMember}
         assignmentsByMember={assignmentsByMember}
         members={members}
+        readOnly={readOnly}
         scoreToPercent={scoreToPercent}
         getInitials={getInitials}
         formatDayRange={formatDayRange}

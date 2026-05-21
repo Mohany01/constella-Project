@@ -42,6 +42,7 @@ class UserResponse(BaseModel):
     id: str
     name: str
     email: EmailStr
+    role: str = ""
     token: str
 
 class ProfileResponse(BaseModel):

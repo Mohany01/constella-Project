@@ -1,8 +1,11 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiClient } from "@/lib/apiClient";
+import { getRoleLabel } from "@/lib/auth";
+import { clearUserSession, useSessionUser } from "@/lib/auth-client";
 import {
   Home,
   User,
@@ -31,7 +34,7 @@ const navigationItems = [
 
 const DEFAULT_PROFILE = {
   name: "Constella Admin",
-  role: "Administrator",
+  role: "Project Manager",
   initials: "CA",
 };
 
@@ -44,10 +47,11 @@ function getInitials(name) {
 }
 
 export function Sidebar({ className = "", children }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { user, isLoading: isAuthLoading } = useSessionUser({ requireAuth: true });
   const [isOpen, setIsOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [activeItem, setActiveItem] = useState("dashboard");
-  const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [activeAlerts, setActiveAlerts] = useState(0);
 
@@ -61,29 +65,20 @@ export function Sidebar({ className = "", children }) {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const path = window.location.pathname || "";
-    const matched = navigationItems.find((item) => path.startsWith(item.href));
-    if (matched) {
-      setActiveItem(matched.id);
-    }
+  const activeItem = useMemo(() => {
+    const matched = navigationItems.find((item) => pathname?.startsWith(item.href));
+    return matched?.id || "dashboard";
+  }, [pathname]);
 
-    try {
-      const raw = window.localStorage.getItem("user");
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      const name = typeof parsed?.name === "string" ? parsed.name.trim() : "";
-      const role = typeof parsed?.email === "string" ? parsed.email.trim() : "Administrator";
-      if (name) {
-        setProfile({
-          name,
-          role,
-          initials: getInitials(name),
-        });
-      }
-    } catch {}
-  }, []);
+  const profile = useMemo(() => {
+    if (!user) return DEFAULT_PROFILE;
+    const name = user.name || DEFAULT_PROFILE.name;
+    return {
+      name,
+      role: getRoleLabel(user.role),
+      initials: getInitials(name),
+    };
+  }, [user]);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,22 +137,15 @@ export function Sidebar({ className = "", children }) {
   );
 
   const handleItemClick = (itemId) => {
-    setActiveItem(itemId);
     if (window.innerWidth < 768) {
       setIsOpen(false);
     }
   };
 
   const handleLogout = () => {
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.removeItem("token");
-        window.localStorage.removeItem("user");
-      } catch {}
-      // Ensure refresh cookie is cleared client-side as best effort.
-      document.cookie = "refresh_token=; Max-Age=0; path=/; SameSite=Lax";
-      window.location.href = "/login";
-    }
+    clearUserSession();
+    document.cookie = "refresh_token=; Max-Age=0; path=/; SameSite=Lax";
+    router.replace("/login");
   };
 
   const sidebarClassName = useMemo(() => {
@@ -177,6 +165,18 @@ export function Sidebar({ className = "", children }) {
 
   return (
     <>
+      {isAuthLoading ? (
+        <div className="sidebar-content">
+          <div className="ws-shell">
+            <section className="ws-panel">
+              <div className="ws-empty">Loading workspace...</div>
+            </section>
+          </div>
+        </div>
+      ) : null}
+
+      {!isAuthLoading ? (
+        <>
       <button
         onClick={() => setIsOpen((prev) => !prev)}
         className="sidebar-toggle"
@@ -316,6 +316,8 @@ export function Sidebar({ className = "", children }) {
       </aside>
 
       <div className={contentClassName}>{children}</div>
+        </>
+      ) : null}
     </>
   );
 }

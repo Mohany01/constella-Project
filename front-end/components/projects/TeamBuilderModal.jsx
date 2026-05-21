@@ -161,7 +161,13 @@ function useLockBodyScroll(isOpen) {
   }, [isOpen]);
 }
 
-export default function TeamBuilderModal({ open, onClose, project, onSave }) {
+export default function TeamBuilderModal({
+  open,
+  onClose,
+  project,
+  onSave,
+  readOnly = false,
+}) {
   const [teamSize, setTeamSize] = useState(3);
   const [draft, setDraft] = useState(null);
   const [error, setError] = useState("");
@@ -240,6 +246,7 @@ export default function TeamBuilderModal({ open, onClose, project, onSave }) {
   }, [analysisTasks]);
 
   const handleBuild = async (overrideSize) => {
+    if (readOnly) return;
     if (isBuilding) return;
     if (!analysisTasks.length) {
       setError("Run the project analysis first to generate tasks.");
@@ -290,6 +297,13 @@ export default function TeamBuilderModal({ open, onClose, project, onSave }) {
       setTeamSize(storedTeam?.num_employees || Math.max(1, normalized.members.length));
       setSavedSnapshot(JSON.stringify(serializeDraftForCompare(normalized)));
       setError("");
+      return;
+    }
+    if (readOnly) {
+      setTeamSize(0);
+      setDraft(null);
+      setSavedSnapshot(null);
+      setError("Team details are not available for this project yet.");
       return;
     }
     const suggested = Math.max(1, Math.min(5, analysisTasks.length || 3));
@@ -424,6 +438,7 @@ export default function TeamBuilderModal({ open, onClose, project, onSave }) {
   }, [isBuilding, showLoader]);
 
   const setTaskMembers = (taskName, nextMemberIds = []) => {
+    if (readOnly) return;
     setDraft((prev) => {
       if (!prev) return prev;
       const baseAssignment = prev.assignments.find(
@@ -504,6 +519,7 @@ export default function TeamBuilderModal({ open, onClose, project, onSave }) {
   };
 
   const handleUnassignMember = (taskName, memberId) => {
+    if (readOnly) return;
     if (!taskName || !memberId || !draft) return;
     const currentIds = (draft.assignments || [])
       .filter((assignment) => assignment.task_name === taskName)
@@ -514,12 +530,14 @@ export default function TeamBuilderModal({ open, onClose, project, onSave }) {
   };
 
   const handleAssignUnassigned = (taskName, memberId) => {
+    if (readOnly) return;
     if (!taskName || !memberId) return;
     setTaskMembers(taskName, [memberId]);
   };
 
 
   const handleAssignmentUpdate = (assignmentId, nextMemberId) => {
+    if (readOnly) return;
     if (!assignmentId || !nextMemberId) return;
     if (
       typeof assignmentId === "string" &&
@@ -547,6 +565,7 @@ export default function TeamBuilderModal({ open, onClose, project, onSave }) {
   };
 
   const handleUnassignAssignment = (assignmentId) => {
+    if (readOnly) return;
     if (
       !assignmentId ||
       (typeof assignmentId === "string" &&
@@ -562,7 +581,7 @@ export default function TeamBuilderModal({ open, onClose, project, onSave }) {
   };
 
   const handleSave = () => {
-    if (!draft) return;
+    if (readOnly || !draft) return;
     const payload = serializeDraft(draft);
     setIsSaving(true);
     setError("");
@@ -616,6 +635,10 @@ export default function TeamBuilderModal({ open, onClose, project, onSave }) {
   }, [draft, savedSnapshot]);
 
   const handleCloseRequest = () => {
+    if (readOnly) {
+      onClose?.();
+      return;
+    }
     if (isSaving) return;
     if (!hasChanges) {
       onClose?.();
@@ -720,8 +743,9 @@ export default function TeamBuilderModal({ open, onClose, project, onSave }) {
                   {project?.name || "Build a team"}
                 </h2>
                 <p className="tb2-subtitle">
-                  Build a high-confidence schedule with clear ownership and
-                  timing across every task.
+                  {readOnly
+                    ? "Review the assigned project team and task ownership."
+                    : "Build a high-confidence schedule with clear ownership and timing across every task."}
                 </p>
               </div>
               <div className="tb2-head-center">
@@ -731,16 +755,18 @@ export default function TeamBuilderModal({ open, onClose, project, onSave }) {
                 </span>
               </div>
               <div className="tb2-head-actions">
-                <button
-                  type="button"
-                  className="tb2-btn tb2-btn-ghost"
-                  onClick={() => handleBuild(teamSize)}
-                  disabled={isBuilding || !analysisTasks.length}
-                >
-                  <RefreshCcw size={16} />
-                  {isBuilding ? "Building..." : "Rebuild"}
-                </button>
-                {hasChanges && (
+                {!readOnly ? (
+                  <button
+                    type="button"
+                    className="tb2-btn tb2-btn-ghost"
+                    onClick={() => handleBuild(teamSize)}
+                    disabled={isBuilding || !analysisTasks.length}
+                  >
+                    <RefreshCcw size={16} />
+                    {isBuilding ? "Building..." : "Rebuild"}
+                  </button>
+                ) : null}
+                {!readOnly && hasChanges ? (
                   <button
                     type="button"
                     className="tb2-btn tb2-btn-primary"
@@ -749,7 +775,7 @@ export default function TeamBuilderModal({ open, onClose, project, onSave }) {
                   >
                     {isSaving ? "Saving..." : "Save team"}
                   </button>
-                )}
+                ) : null}
                 <button
                   type="button"
                   className="tb2-icon-btn"
@@ -771,6 +797,7 @@ export default function TeamBuilderModal({ open, onClose, project, onSave }) {
               <TeamBuilderV2
                 data={draft}
                 analysisTasks={analysisTasks}
+                readOnly={readOnly}
                 onAssignmentUpdate={handleAssignmentUpdate}
                 onUnassignAssignment={handleUnassignAssignment}
               />

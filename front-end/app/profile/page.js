@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Sidebar } from "@/components/ui/modern-side-bar";
 import { apiClient } from "@/lib/apiClient";
+import { persistUserSession } from "@/lib/auth-client";
 import { safeLocalStorageSet } from "@/lib/storage";
 import { KeyRound, Pencil, Trash2, Upload, X } from "lucide-react";
 
@@ -93,6 +94,7 @@ export default function ProfilePage() {
         const data = await apiClient("/auth/profile", { method: "GET" });
         if (cancelled) return;
         setProfile(data);
+        persistUserSession(data);
       } catch (err) {
         if (cancelled) return;
         setError(err.message || "Failed to load profile.");

@@ -7,6 +7,7 @@ export default function TaskList({
   tasks,
   conflictIds = new Set(),
   allTasks,
+  readOnly = false,
   draggedDisabled = false,
   onRename,
   onStartChange,
@@ -80,7 +81,8 @@ export default function TaskList({
           isConflict={conflictIds.has(task.id)}
           draggedId={draggedId}
           dragOverId={dragOverId}
-          draggedDisabled={draggedDisabled}
+          draggedDisabled={draggedDisabled || readOnly}
+          readOnly={readOnly}
           allTasks={allTasks || tasks}
           onRename={onRename}
           onStartChange={onStartChange}

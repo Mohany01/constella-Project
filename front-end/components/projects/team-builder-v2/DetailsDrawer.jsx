@@ -12,6 +12,7 @@ export default function DetailsDrawer({
   member,
   assignmentsByMember,
   members,
+  readOnly = false,
   scoreToPercent,
   getInitials,
   formatDayRange,
@@ -169,6 +170,26 @@ export default function DetailsDrawer({
                       +{assignedMembers.length - 4}
                     </span>
                   )}
+                  {!readOnly ? (
+                    <button
+                      type="button"
+                      className="tb2-add-member-btn"
+                      title="Add member"
+                      onClick={(event) => {
+                        setMembersAnchor(event.currentTarget);
+                        setIsMembersOpen(true);
+                      }}
+                    >
+                      <Plus size={14} />
+                    </button>
+                  ) : null}
+                </div>
+                {/* email chips removed per request */}
+              </div>
+            ) : (
+              <div className="tb2-avatar-row">
+                <span className="tb2-muted">No members yet.</span>
+                {!readOnly ? (
                   <button
                     type="button"
                     className="tb2-add-member-btn"
@@ -180,23 +201,7 @@ export default function DetailsDrawer({
                   >
                     <Plus size={14} />
                   </button>
-                </div>
-                {/* email chips removed per request */}
-              </div>
-            ) : (
-              <div className="tb2-avatar-row">
-                <span className="tb2-muted">No members yet.</span>
-                <button
-                  type="button"
-                  className="tb2-add-member-btn"
-                  title="Add member"
-                  onClick={(event) => {
-                    setMembersAnchor(event.currentTarget);
-                    setIsMembersOpen(true);
-                  }}
-                >
-                  <Plus size={14} />
-                </button>
+                ) : null}
               </div>
             )}
           </div>
@@ -234,23 +239,25 @@ export default function DetailsDrawer({
             )}
           </div>
 
-          <MembersPopover
-            anchorEl={membersAnchor}
-            isOpen={isMembersOpen}
-            onClose={() => setIsMembersOpen(false)}
-            projectMembers={projectMembers}
-            assignedMemberIds={new Set(task.memberIds || [])}
-            memberDetails={assignedDetails}
-            onAddMember={(memberId) => {
-              onReassign?.(assignment?.id, memberId);
-            }}
-            onRemoveMember={(memberId) => {
-              const detail = assignedDetails.get(memberId);
-              if (detail?.id) {
-                onUnassignAssignment?.(detail.id);
-              }
-            }}
-          />
+          {!readOnly ? (
+            <MembersPopover
+              anchorEl={membersAnchor}
+              isOpen={isMembersOpen}
+              onClose={() => setIsMembersOpen(false)}
+              projectMembers={projectMembers}
+              assignedMemberIds={new Set(task.memberIds || [])}
+              memberDetails={assignedDetails}
+              onAddMember={(memberId) => {
+                onReassign?.(assignment?.id, memberId);
+              }}
+              onRemoveMember={(memberId) => {
+                const detail = assignedDetails.get(memberId);
+                if (detail?.id) {
+                  onUnassignAssignment?.(detail.id);
+                }
+              }}
+            />
+          ) : null}
 
         </>
       )}
@@ -301,15 +308,17 @@ export default function DetailsDrawer({
                           {badge.label}
                         </span>
                       </div>
-                      <button
-                        type="button"
-                        className="tb2-remove-btn"
-                        title="Remove from this task"
-                        aria-label="Remove from this task"
-                        onClick={() => onUnassignAssignment?.(item.id)}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {!readOnly ? (
+                        <button
+                          type="button"
+                          className="tb2-remove-btn"
+                          title="Remove from this task"
+                          aria-label="Remove from this task"
+                          onClick={() => onUnassignAssignment?.(item.id)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      ) : null}
                     </div>
                   );
                 })}

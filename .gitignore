@@ -19,3 +19,12 @@ Thumbs.db
 # Python
 __pycache__/
 *.pyc
+
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+.next/
+.env
+.env.local
+.DS_Store
